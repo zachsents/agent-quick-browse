@@ -1,0 +1,39 @@
+{
+  "categories": {
+    "correctness": "error",
+    "suspicious": "error"
+  },
+  "plugins": ["eslint", "typescript", "unicorn", "oxc"],
+  "rules": {
+    "eslint/no-shadow": "off",
+    "typescript/consistent-return": "off",
+    "typescript/no-explicit-any": "error",
+    "typescript/no-empty-object-type": [
+      "error",
+      { "allowInterfaces": "with-single-extends" }
+    ],
+    "typescript/no-restricted-types": "error",
+    "typescript/no-inferrable-types": "error",
+    "typescript/no-unnecessary-boolean-literal-compare": "error",
+    "typescript/no-unnecessary-condition": [
+      "error",
+      { "allowConstantLoopConditions": "only-allowed-literals" }
+    ],
+    "typescript/no-unnecessary-parameter-property-assignment": "error",
+    "typescript/no-unnecessary-qualifier": "error",
+    "typescript/no-unnecessary-template-expression": "error",
+    "typescript/no-unnecessary-type-arguments": "error",
+    "typescript/no-unnecessary-type-assertion": "error",
+    "typescript/no-unnecessary-type-constraint": "error",
+    "typescript/no-unnecessary-type-parameters": "error",
+    "typescript/prefer-find": "error",
+    "typescript/prefer-for-of": "error",
+    "typescript/prefer-includes": "error",
+    "typescript/prefer-optional-chain": "error",
+    "typescript/prefer-promise-reject-errors": "error",
+    "typescript/prefer-reduce-type-parameter": "error",
+    "typescript/prefer-return-this-type": "error",
+    "typescript/prefer-string-starts-ends-with": "error",
+    "typescript/prefer-ts-expect-error": "error"
+  }
+}
