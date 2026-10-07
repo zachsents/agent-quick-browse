@@ -11,7 +11,7 @@ import * as tab from "./tab.ts"
 const USAGE = `clef-browser — drive your own Chrome with a decision model (Clef or Jev)
 
 Usage:
-  clef-browser run "<goal>" [--url <url>] [--fact key=value ...] [--model clef|clef-flash|jev] [--text] [--max-steps 25]
+  clef-browser run "<goal>" [--url <url>] [--fact key=value ...] [--model jev|clef|clef-flash] [--text] [--max-steps 25]
   clef-browser look [--url <url>] [--text]  Print numbered elements + annotated screenshot (or the text outline)
   clef-browser close                  Close the session's tab
   clef-browser mcp                    Run as a stdio MCP server
@@ -29,7 +29,7 @@ const { values, positionals } = parseArgs({
   options: {
     url: { type: "string" },
     fact: { type: "string", multiple: true, default: [] },
-    model: { type: "string", default: "clef" },
+    model: { type: "string", default: "jev" },
     text: { type: "boolean", default: false },
     "max-steps": { type: "string", default: "25" },
     session: { type: "string", default: "default" },

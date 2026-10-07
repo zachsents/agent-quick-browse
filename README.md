@@ -25,16 +25,31 @@ Sonnet times exclude ~15s of agent startup. Also passing in single-run ceiling t
 
 ## Setup
 
-```sh
-bun install && bun link && clef-browser setup
+Requires macOS, Google Chrome, [Bun](https://bun.sh), and a [Vercel AI Gateway](https://vercel.com/ai-gateway) key. Paste this to your coding agent (Claude Code, Codex, Cursor, …):
+
+```text
+Set up the clef-browser MCP server from https://github.com/zachsents/clef-browser for me:
+
+1. Clone it to ~/code/clef-browser and run: bun install && bun link && clef-browser setup
+2. Tell me to open chrome://extensions, turn on Developer mode, click "Load unpacked" and pick
+   ~/code/clef-browser/extension. Wait until I confirm.
+3. Check that AI_GATEWAY_API_KEY is exported in ~/.zprofile (login shells read that, not ~/.zshrc).
+   If it isn't, ask me to add it myself — never ask me to paste the key into chat.
+4. Register the MCP server, launched through a login shell so it picks up that key. For Claude Code:
+   claude mcp add -s user clef-browser -- zsh -lc "exec ~/.bun/bin/bun ~/code/clef-browser/src/index.ts mcp"
+   For other agents, add an MCP server with command `zsh` and
+   args ["-lc", "exec ~/.bun/bin/bun ~/code/clef-browser/src/index.ts mcp"].
+5. Verify: clef-browser run "Open the Ask HN page" --url https://news.ycombinator.com
+   It should print JSON with "status":"done" and a url ending in /ask. Then tell me to restart
+   my agent session so the browser_* tools load.
 ```
 
-Load `extension/` unpacked in `chrome://extensions`. Env: `AI_GATEWAY_API_KEY` (Jev), `CLOUDFLARE_AI_ACCOUNT_ID` + `CLOUDFLARE_AI_API_TOKEN` (Clef).
+Optional: set `CLOUDFLARE_AI_ACCOUNT_ID` and `CLOUDFLARE_AI_API_TOKEN` (a Workers AI token) to use the Clef models.
 
 ## Usage
 
 ```sh
-clef-browser run "search for Cloudflare and open its article" --url https://en.wikipedia.org --fact search=Cloudflare --model jev
+clef-browser run "search for Cloudflare and open its article" --url https://en.wikipedia.org --fact search=Cloudflare
 clef-browser look --text          # what the model sees
 clef-browser mcp                  # MCP server: browser_run, browser_look, browser_click, browser_type, …
 ```

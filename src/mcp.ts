@@ -62,9 +62,9 @@ The model can click anything the user is logged into. Do not give it goals that 
         max_steps: z.number().int().min(1).max(40).default(12),
         model: z
           .enum(["clef", "clef-flash", "jev"])
-          .default("clef")
+          .default("jev")
           .describe(
-            "clef (27B, sees screenshots), clef-flash (9B, faster), jev (text-only, fastest)",
+            "jev (default: text-only, fastest, best in benchmarks; needs AI_GATEWAY_API_KEY), clef (27B, sees screenshots), clef-flash (9B, faster); clef models need Cloudflare keys",
           ),
         text_only: z
           .boolean()
