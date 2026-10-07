@@ -1,4 +1,5 @@
-// Relays commands from the clef-browser native host to one dedicated "agent" tab via chrome.debugger (CDP).
+// Relays commands from the clef-browser native host to agent tabs via chrome.debugger (CDP).
+// Each named session gets its own background tab, so any number of agents can run in parallel.
 // The native port also keeps this service worker alive while Chrome is running.
 
 const HOST = "com.clef_browser.host"
@@ -31,57 +32,123 @@ async function onMessage({ id, method, params }) {
 }
 
 const handlers = {
-  async cdp({ method, params }) {
-    const tabId = await ensureAttachedTab()
+  async cdp({ session, method, params }) {
+    const tabId = await ensureAttachedTab(session)
     return chrome.debugger.sendCommand({ tabId }, method, params)
   },
-  async tab() {
-    const tab = await chrome.tabs.get(await ensureAttachedTab())
+  async tab({ session }) {
+    const tab = await chrome.tabs.get(await ensureAttachedTab(session))
     return { url: tab.url ?? "", title: tab.title ?? "" }
+  },
+  async close({ session }) {
+    const tabId = await getSessionTab(session)
+    await setSessionTab(session, null)
+    if (tabId != null) await chrome.tabs.remove(tabId)
+    return null
   },
 }
 
-async function getAgentTabId() {
-  const { agentTabId } = await chrome.storage.session.get("agentTabId")
-  if (agentTabId == null) return null
-  return chrome.tabs.get(agentTabId).then(
+/**
+ * Session name → tab id, kept in session storage so it survives service worker
+ * restarts.
+ */
+async function getSessions() {
+  const { sessions } = await chrome.storage.session.get("sessions")
+  return sessions ?? {}
+}
+
+async function getSessionTab(session) {
+  const tabId = (await getSessions())[session]
+  if (tabId == null) return null
+  return chrome.tabs.get(tabId).then(
     (tab) => tab.id,
     () => null,
   )
 }
 
-async function setAgentTab(tabId) {
-  await chrome.storage.session.set({ agentTabId: tabId })
+// Session map updates are serialized so parallel sessions don't overwrite each other's entries
+let sessionWrite = Promise.resolve()
+function setSessionTab(session, tabId) {
+  sessionWrite = sessionWrite.then(async () => {
+    const sessions = await getSessions()
+    if (tabId == null) delete sessions[session]
+    else sessions[session] = tabId
+    await chrome.storage.session.set({ sessions })
+  })
+  return sessionWrite
+}
+
+/** Puts the tab in the shared pink "Clef" group (one per window). */
+async function groupTab(tabId) {
   const tab = await chrome.tabs.get(tabId)
-  if (tab.groupId === chrome.tabGroups.TAB_GROUP_ID_NONE) {
-    const groupId = await chrome.tabs.group({ tabIds: tabId })
-    await chrome.tabGroups.update(groupId, { title: "Clef", color: "pink" })
+  if (tab.groupId !== chrome.tabGroups.TAB_GROUP_ID_NONE) return
+  const [existing] = await chrome.tabGroups.query({
+    title: "Clef",
+    windowId: tab.windowId,
+  })
+  if (existing) {
+    await chrome.tabs.group({ tabIds: tabId, groupId: existing.id })
+    return
   }
+  const groupId = await chrome.tabs.group({ tabIds: tabId })
+  await chrome.tabGroups.update(groupId, {
+    title: "Clef",
+    color: "pink",
+    collapsed: true,
+  })
 }
 
 const attached = new Set()
 chrome.debugger.onDetach.addListener(({ tabId }) => attached.delete(tabId))
 
+// One in-flight tab creation per session, so concurrent first calls don't open duplicate tabs
+const creating = new Map()
+
 /**
- * Returns the agent tab, creating it (in a "Clef" tab group) if needed, with
- * the debugger attached.
+ * Returns the session's agent tab, creating it in the background if needed,
+ * with the debugger attached.
  */
-async function ensureAttachedTab() {
-  let tabId = await getAgentTabId()
+async function ensureAttachedTab(session) {
+  let tabId = await getSessionTab(session)
   if (tabId == null) {
-    const tab = await chrome.tabs.create({ url: "about:blank", active: true })
-    tabId = tab.id
-    await setAgentTab(tabId)
+    if (!creating.has(session)) {
+      creating.set(
+        session,
+        (async () => {
+          // Background tab so the agent never steals focus from what the user is doing
+          const tab = await chrome.tabs.create({
+            url: "about:blank",
+            active: false,
+          })
+          await setSessionTab(session, tab.id)
+          await groupTab(tab.id)
+          return tab.id
+        })().finally(() => creating.delete(session)),
+      )
+    }
+    tabId = await creating.get(session)
   }
   if (!attached.has(tabId)) {
     await chrome.debugger.attach({ tabId }, "1.3")
+    // Hidden tabs otherwise report no focus and some sites pause or skip focus-dependent UI
+    await chrome.debugger.sendCommand(
+      { tabId },
+      "Emulation.setFocusEmulationEnabled",
+      { enabled: true },
+    )
     attached.add(tabId)
   }
   return tabId
 }
 
-// Links that open a new tab from the agent tab hand control over to that new tab
+// A link that opens a new tab from a session's tab hands that session over to the new tab
 chrome.tabs.onCreated.addListener(async (tab) => {
-  if (tab.openerTabId != null && tab.openerTabId === (await getAgentTabId()))
-    await setAgentTab(tab.id)
+  if (tab.openerTabId == null) return
+  const sessions = await getSessions()
+  const session = Object.keys(sessions).find(
+    (name) => sessions[name] === tab.openerTabId,
+  )
+  if (session == null) return
+  await setSessionTab(session, tab.id)
+  await groupTab(tab.id)
 })

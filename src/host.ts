@@ -13,7 +13,7 @@ const replySchema = z.object({
   error: z.string().optional(),
 })
 const requestSchema = z.object({
-  method: z.enum(["cdp", "tab"]),
+  method: z.enum(["cdp", "tab", "close"]),
   params: z.unknown().optional(),
 })
 

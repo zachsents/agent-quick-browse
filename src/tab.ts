@@ -1,5 +1,22 @@
+import { AsyncLocalStorage } from "node:async_hooks"
 import { z } from "zod"
 import { SOCKET_PATH } from "./paths.ts"
+
+const sessionStore = new AsyncLocalStorage<string>()
+
+/**
+ * Runs `fn` against the named session's agent tab. Each session has its own
+ * background tab, so sessions can run in parallel. Calls outside withSession
+ * use the "default" session.
+ */
+export function withSession<T>(session: string, fn: () => Promise<T>) {
+  return sessionStore.run(session, fn)
+}
+
+/** Closes the session's agent tab. */
+export async function close() {
+  await rpc("close")
+}
 
 const rpcResponseSchema = z.object({
   result: z.unknown().optional(),
@@ -16,11 +33,14 @@ const evaluateResultSchema = z.object({
 })
 const rectSchema = z.object({ x: z.number(), y: z.number() })
 
-async function rpc(method: "cdp" | "tab", params?: unknown) {
+async function rpc(method: "cdp" | "tab" | "close", params?: object) {
   const res = await fetch("http://localhost/rpc", {
     unix: SOCKET_PATH,
     method: "POST",
-    body: JSON.stringify({ method, params }),
+    body: JSON.stringify({
+      method,
+      params: { ...params, session: sessionStore.getStore() ?? "default" },
+    }),
   }).catch(() => {
     throw new Error(
       "Can't reach the Clef Browser Bridge. Is Chrome running with the extension loaded? (run `clef-browser setup`)",
@@ -41,9 +61,17 @@ function cdp(method: string, params?: Record<string, unknown>) {
  * must not reference anything outside its own body.
  */
 export async function evaluate<A>(fn: (arg: A) => unknown, arg?: A) {
+  return evaluateExpression(`(${fn.toString()})(${JSON.stringify(arg)})`)
+}
+
+/**
+ * Evaluates a JS expression in the agent tab (awaiting promises) and returns
+ * its JSON-serializable value.
+ */
+export async function evaluateExpression(expression: string) {
   const { result, exceptionDetails } = evaluateResultSchema.parse(
     await cdp("Runtime.evaluate", {
-      expression: `(${fn.toString()})(${JSON.stringify(arg)})`,
+      expression,
       returnByValue: true,
       awaitPromise: true,
     }),
@@ -67,33 +95,63 @@ export async function goto(url: string) {
 }
 
 /**
- * Waits for the DOM to be parsed (pages that never go fully idle are fine).
- * Gives up quietly after ~5s.
+ * Waits until the page is parsed and then visually settled: no DOM mutations
+ * for 500ms (max ~6s). The settle step matters for SPAs like Gmail, which
+ * report "complete" while still showing a splash screen.
  */
 export async function waitForLoad() {
   for (let i = 0; i < 25; i++) {
-    await Bun.sleep(200)
+    // Evaluate throws while a navigation swaps the document; treat that as still loading
     const ready = await evaluate(() => document.readyState).catch(
       () => "loading",
     )
     if (ready !== "loading") break
+    await Bun.sleep(200)
   }
-  await Bun.sleep(300)
+  await evaluate(
+    () =>
+      new Promise<void>((resolve) => {
+        const finish = () => {
+          observer.disconnect()
+          clearTimeout(maxTimer)
+          resolve()
+        }
+        let quietTimer = setTimeout(finish, 500)
+        const maxTimer = setTimeout(finish, 4000)
+        const observer = new MutationObserver(() => {
+          clearTimeout(quietTimer)
+          quietTimer = setTimeout(finish, 500)
+        })
+        // Structural changes only: spinners/animations churn attributes forever
+        observer.observe(document, {
+          subtree: true,
+          childList: true,
+          characterData: true,
+        })
+      }),
+  ).catch(() => undefined)
 }
 
 /**
  * Viewport screenshot at CSS-pixel resolution (not retina) to keep Clef
- * requests small.
+ * requests small. CDP's clip is measured in unzoomed pixels, so it's scaled by
+ * the page zoom (e.g. 125%) to cover the whole viewport. Works while the tab is
+ * in the background — it captures the tab's own rendering, not the screen.
  */
 export async function screenshot() {
+  const [metrics, dpr] = await Promise.all([
+    cdp("Page.getLayoutMetrics"),
+    evaluate(() => devicePixelRatio),
+  ])
   const viewport = z
-    .object({ width: z.number(), height: z.number(), dpr: z.number() })
+    .object({
+      clientWidth: z.number(),
+      clientHeight: z.number(),
+      zoom: z.number(),
+    })
     .parse(
-      await evaluate(() => ({
-        width: innerWidth,
-        height: innerHeight,
-        dpr: devicePixelRatio,
-      })),
+      z.object({ cssVisualViewport: z.unknown() }).parse(metrics)
+        .cssVisualViewport,
     )
   const { data } = z.object({ data: z.string() }).parse(
     await cdp("Page.captureScreenshot", {
@@ -102,9 +160,9 @@ export async function screenshot() {
       clip: {
         x: 0,
         y: 0,
-        width: viewport.width,
-        height: viewport.height,
-        scale: 1 / viewport.dpr,
+        width: viewport.clientWidth * viewport.zoom,
+        height: viewport.clientHeight * viewport.zoom,
+        scale: 1 / z.number().parse(dpr),
       },
     }),
   )
@@ -112,8 +170,9 @@ export async function screenshot() {
 }
 
 /**
- * Scrolls the tagged element into view and returns its center in viewport
- * coordinates.
+ * Scrolls the tagged element into view and returns a point that actually hits
+ * it. Uses the element's individual line boxes, because the bounding-box center
+ * of a link that wraps onto two lines falls in the gap between them.
  */
 async function elementCenter(id: string) {
   return rectSchema.parse(
@@ -125,8 +184,14 @@ async function elementCenter(id: string) {
         inline: "center",
         behavior: "instant",
       })
-      const rect = el.getBoundingClientRect()
-      return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+      const centers = [...el.getClientRects(), el.getBoundingClientRect()]
+        .filter((r) => r.width > 0 && r.height > 0)
+        .map((r) => ({ x: r.left + r.width / 2, y: r.top + r.height / 2 }))
+      const hits = centers.find(({ x, y }) => {
+        const hit = document.elementFromPoint(x, y)
+        return !!hit && (el === hit || el.contains(hit) || hit.contains(el))
+      })
+      return hits ?? centers.at(-1)
     }, id),
   )
 }

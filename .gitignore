@@ -23,3 +23,6 @@ coverage/
 
 # TypeScript
 *.tsbuildinfo
+
+# Raw benchmark output (summaries go in the README)
+bench/results/

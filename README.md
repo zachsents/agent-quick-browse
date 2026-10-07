@@ -1,31 +1,42 @@
 # clef-browser
 
-Drive your own, logged-in Chrome with Cloudflare's [Clef](https://developers.cloudflare.com/workers-ai/models/clef/) decision model. Each step, Clef sees a screenshot with numbered interactive elements and picks one action + one element (~2s). A text LLM via Vercel AI Gateway only writes text to type and the final answer.
+Fast, cheap browser actions for agents. A decision model — Cloudflare's [Clef](https://developers.cloudflare.com/workers-ai/models/clef/) or TypeSafe's Jev — picks each action and element in your real, logged-in Chrome; a smarter agent plans the goals. No LLM in the loop. Runs in parallel background tabs, via CLI or MCP.
 
-The agent works in one dedicated tab (pink "Clef" tab group). Every command continues in that tab, so a smarter model can chain small sub-goals.
+## Benchmarks
+
+Average time per goal, from start page to done (5 runs per decision-model cell, 1 run for Sonnet). ✗ = failed every run.
+
+| Goal                      | Jev (text) | Clef (text) | Clef (vision) | Sonnet + Claude in Chrome |
+| ------------------------- | ---------- | ----------- | ------------- | ------------------------- |
+| One click                 | **2.3s**   | 6.8s        | 11.8s         | 16.4s                     |
+| Search + pick result      | **4.7s**   | 13.9s       | 9.1s          | 16.5s                     |
+| 7-field form + submit     | **7.2s**   | 8.9s        | 11.7s         | 21.5s                     |
+| 7-part navigation         | **13.9s**  | 21.0s       | 23.0s         | 50.2s                     |
+| Find a story across pages | **4.5s**   | ✗           | ✗             | 74.6s                     |
+| Google Flights search     | ✗          | ✗           | ✗             | **56.0s**                 |
+
+Sonnet times exclude ~15s of agent startup. Also passing in single-run ceiling tests: 10-part navigation, 4-step "read then follow" chains, 8-field forms with dropdowns/checkboxes/radios, numeric comparisons, and returning `blocked` for impossible goals. Reproduce with `bun bench/run.ts --levels 1,2,4,14,18,5 --reps 5`.
+
+## Scoping goals
+
+- **One call:** one objective on one site with explicit steps — "search for X and open the result", "fill the form with these facts and submit", up to ~10 navigation steps, "open the story with the most points".
+- **Split up or do yourself:** complex app widgets (date pickers, Google Flights — models declare `done` before the final submit), vague or judgment-heavy goals, anything needing writing.
+- Pass every string to type (including dates) as `facts`. Check each result (`status`, `reason`, `url`, `actions`) before the next call.
 
 ## Setup
 
 ```sh
-bun install && bun link
-clef-browser setup   # registers the native messaging host
+bun install && bun link && clef-browser setup
 ```
 
-Then in `chrome://extensions`: Developer mode → Load unpacked → `extension/` (ID `enljjghanlofaifkkhdhgnnjekbjbpnc`).
-
-Env (in `~/.zprofile`): `CLOUDFLARE_AI_ACCOUNT_ID`, `CLOUDFLARE_AI_API_TOKEN` (Workers AI token), `AI_GATEWAY_API_KEY`.
+Load `extension/` unpacked in `chrome://extensions`. Env: `AI_GATEWAY_API_KEY` (Jev), `CLOUDFLARE_AI_ACCOUNT_ID` + `CLOUDFLARE_AI_API_TOKEN` (Clef).
 
 ## Usage
 
 ```sh
-clef-browser run "search for Cloudflare and find its founding year" --url https://en.wikipedia.org
-clef-browser run "open the History section"     # continues on the same tab
-clef-browser look                               # numbered elements + annotated screenshot
-clef-browser mcp                                # stdio MCP server
+clef-browser run "search for Cloudflare and open its article" --url https://en.wikipedia.org --fact search=Cloudflare --model jev
+clef-browser look --text          # what the model sees
+clef-browser mcp                  # MCP server: browser_run, browser_look, browser_click, browser_type, …
 ```
 
-MCP tools: `browser_run`, `browser_look`, `browser_navigate`, `browser_click`, `browser_type`, `browser_scroll`, `browser_back`, `browser_page_text`.
-
-## How it connects
-
-`extension/` (MV3, `chrome.debugger`) ⇄ native messaging ⇄ `src/host.ts` ⇄ unix socket `~/.clef-browser/host.sock` ⇄ CLI / MCP server. Chrome starts the host automatically. The socket (not a localhost port) keeps web pages from reaching it.
+Each `--session` (or MCP session) gets its own background tab; omit `--url` to continue where it left off.

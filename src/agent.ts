@@ -1,13 +1,17 @@
-import { generateText } from "ai"
 import * as R from "remeda"
-import { askClef, type ClefModel } from "./clef.ts"
-import { describeElement, snapshotPage, type PageElement } from "./snapshot.ts"
+import { decide, type DecisionModel } from "./decide.ts"
+import {
+  describeElement,
+  snapshotPage,
+  type PageElement,
+  type SnapshotMode,
+} from "./snapshot.ts"
 import * as tab from "./tab.ts"
 
 const ACTIONS = {
   click:
     "Click the numbered element that best advances the goal (link, button, tab, checkbox, result, etc.).",
-  type: "Type into a numbered text field / search box, or pick an option in a numbered dropdown. Only if that field doesn't already hold the right value.",
+  type: "Type one of the provided facts into a numbered text field / search box, or pick an option in a numbered dropdown. Only if that field doesn't already hold the right value.",
   press_enter:
     "Press Enter to submit text that was just typed (e.g. a search box with no visible submit button).",
   scroll_down: "Scroll down because what is needed is not visible yet.",
@@ -23,34 +27,36 @@ type Action = keyof typeof ACTIONS
 type Context = {
   goal: string
   facts: Record<string, string>
-  model: ClefModel
-  textModel: string
+  model: DecisionModel
+  /** Jev is text-only, so it always uses "text" */
+  mode: SnapshotMode
   history: string[]
   log: (line: string) => void
 }
 
 /**
- * Clef-driven browser loop over the agent tab. Each step Clef sees a numbered
- * screenshot plus the element list and picks one action and one target element
- * in a single call. A text LLM (via Vercel AI Gateway) is only used to write
- * text to type and to summarize the answer at the end.
+ * Decision-model-driven browser loop over the agent tab. Each step the model
+ * sees the page (a numbered screenshot, or a whole-page text outline) and picks
+ * one action and one target element in a single call. No LLM is involved: text
+ * to type comes from the caller's `facts` (Clef picks which one fits a field),
+ * and the caller reads the page itself if it needs information from it.
  */
 export async function runAgent({
   maxSteps,
   ...options
 }: Omit<Context, "history"> & { maxSteps: number }) {
   const ctx: Context = { ...options, history: [] }
-  const { goal, facts, model, history, log } = ctx
+  const { goal, facts, model, mode, history, log } = ctx
 
   for (let step = 1; step <= maxSteps; step++) {
     const started = performance.now()
-    const { elements, screenshot } = await snapshotPage()
+    const { elements, screenshot, outline } = await snapshotWithRetry(mode)
     const descriptions = elements.map(describeElement)
     const { url, title } = await tab.info()
 
-    const answers = await askClef({
+    const answers = await decide({
       model,
-      images: [screenshot],
+      ...(screenshot && { images: [screenshot] }),
       state: {
         goal,
         ...(!R.isEmpty(facts) && { facts }),
@@ -58,13 +64,17 @@ export async function runAgent({
         title,
         step: `${step} of ${maxSteps}`,
         previous_actions: history.length ? history.slice(-10) : "none yet",
-        visible_elements: descriptions,
+        ...(outline == null
+          ? { visible_elements: descriptions }
+          : { page: outline }),
       },
       questions: {
         action: {
           type: "choice",
           instructions:
-            "You are operating a web browser to achieve the goal. The screenshot shows the current page with interactive elements boxed and numbered in red. What is the single best next action?",
+            mode === "vision"
+              ? "You are operating a web browser to achieve the goal. The screenshot shows the current page with interactive elements boxed and numbered in red. What is the single best next action?"
+              : "You are operating a web browser to achieve the goal. The page is given as a text outline with interactive elements numbered [n]. Elements marked (above/below …) are off-screen but can be clicked or typed into directly — no need to scroll to them. What is the single best next action?",
           criteria: ACTIONS,
         },
         ...(elements.length >= 2 && {
@@ -93,21 +103,34 @@ export async function runAgent({
       `step ${step}  ${summary}  (action ${actionAnswer.confidence.toFixed(2)}${targetAnswer ? `, target ${targetAnswer.confidence.toFixed(2)}` : ""}, ${ms}ms)`,
     )
 
-    if (action === "done")
-      return finish("done", history, await summarizeAnswer(ctx))
+    if (action === "done") return finish("done", history)
     if (action === "blocked") return finish("blocked", history)
 
     try {
       await perform(action, target, ctx)
       history.push(summary)
+      if (
+        history.length >= 3 &&
+        history.slice(-3).every((entry) => entry === summary)
+      )
+        return finish(
+          "blocked",
+          history,
+          `Repeated "${summary}" 3 times without progress`,
+        )
     } catch (error) {
+      if (error instanceof NeedsTextError)
+        return finish("blocked", history, error.message)
       // Failed actions are fed back to Clef so it can pick something else next step
       const message =
         error instanceof Error ? error.message.split("\n")[0] : String(error)
       log(`  ! ${message}`)
       history.push(`${summary} -> FAILED: ${message}`)
     }
+    const settleStarted = performance.now()
     await tab.waitForLoad()
+    const settleMs = Math.round(performance.now() - settleStarted)
+    if (settleMs > 1500) log(`  (page took ${settleMs}ms to settle)`)
   }
 
   return finish("max_steps", history)
@@ -120,9 +143,31 @@ export async function runAgent({
 async function finish(
   status: "done" | "blocked" | "max_steps",
   actions: string[],
-  answer?: string,
+  reason?: string,
 ) {
-  return { status, answer, actions, ...(await tab.info()) }
+  return { status, ...(reason && { reason }), actions, ...(await tab.info()) }
+}
+
+/**
+ * Clef wants to type but none of the caller's facts fits the field, so the
+ * caller has to supply the text.
+ */
+class NeedsTextError extends Error {}
+
+/**
+ * Snapshots can fail when they land mid-navigation (the document is swapped out
+ * underneath the script), so wait for the page and retry a couple of times
+ * before giving up.
+ */
+async function snapshotWithRetry(mode: SnapshotMode) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await snapshotPage(mode)
+    } catch (error) {
+      if (attempt >= 3) throw error
+      await tab.waitForLoad()
+    }
+  }
 }
 
 function isAction(choice: string): choice is Action {
@@ -141,15 +186,17 @@ async function perform(
   switch (action) {
     case "click":
       if (!target) throw new Error("no element to click")
+      // Clicking a native <select> opens a browser popup CDP can't operate, so pick the option directly
+      if (target.tag === "select") return selectFromDropdown(target, ctx)
       return tab.click(target.id)
     case "type": {
       if (!target) throw new Error("no element to type into")
-      if (target.tag === "select") {
-        const option = await chooseSelectOption(target, ctx)
-        ctx.log(`  select "${option}"`)
-        return tab.selectOption(target.id, option)
+      if (!target.editable && target.tag !== "select") {
+        ctx.log("  (not a text field; clicking instead)")
+        return tab.click(target.id)
       }
-      const text = await writeText(target, ctx)
+      if (target.tag === "select") return selectFromDropdown(target, ctx)
+      const text = await chooseFact(target, ctx)
       ctx.log(`  type "${text}"`)
       return tab.fill(target.id, text)
     }
@@ -164,8 +211,14 @@ async function perform(
   }
 }
 
+async function selectFromDropdown(target: PageElement, ctx: Context) {
+  const option = await chooseSelectOption(target, ctx)
+  ctx.log(`  select "${option}"`)
+  return tab.selectOption(target.id, option)
+}
+
 /**
- * Uses Clef again (not the LLM) to pick a dropdown option, since that's a pure
+ * Uses the decision model to pick a dropdown option, since that's a pure
  * decision.
  */
 async function chooseSelectOption(
@@ -175,7 +228,7 @@ async function chooseSelectOption(
   const options = await tab.selectOptions(target.id)
   if (options.length < 2) throw new Error("dropdown has fewer than 2 options")
 
-  const answers = await askClef({
+  const answers = await decide({
     model,
     state: { goal, facts, dropdown: describeElement(target) },
     questions: {
@@ -191,40 +244,40 @@ async function chooseSelectOption(
   return answers.option.choice
 }
 
-async function writeText(
+/**
+ * Uses Clef to pick which of the caller's facts belongs in a text field. Throws
+ * NeedsTextError when there are no facts or none fits, which ends the run as
+ * blocked so the caller can type it themselves.
+ */
+async function chooseFact(
   target: PageElement,
-  { goal, facts, history, textModel }: Context,
+  { goal, facts, history, model }: Context,
 ) {
-  const { url, title } = await tab.info()
-  const { text } = await generateText({
-    model: textModel,
-    prompt: [
-      "You are filling in one field in a web browser on behalf of a user.",
-      `Goal: ${goal}`,
-      !R.isEmpty(facts) &&
-        `Known facts (use these verbatim where relevant): ${JSON.stringify(facts)}`,
-      `Page: ${title} (${url})`,
-      `Previous actions: ${history.slice(-5).join("; ") || "none"}`,
-      `Field: ${describeElement(target)}`,
-      "Reply with ONLY the exact text to type into this field — no quotes, no explanation.",
-    ]
-      .filter(Boolean)
-      .join("\n"),
-  })
-  return text.trim()
-}
+  const needsText = new NeedsTextError(
+    `Needs text for ${describeElement(target)}. Pass it in facts, or type it with browser_type.`,
+  )
+  if (R.isEmpty(facts)) throw needsText
 
-/** Reads the final page text and has the LLM answer the goal from it. */
-async function summarizeAnswer({ goal, history, textModel }: Context) {
-  const [{ url }, pageText] = await Promise.all([tab.info(), tab.innerText()])
-  const { text } = await generateText({
-    model: textModel,
-    prompt: [
-      `A browser agent was given this goal: ${goal}`,
-      `It took these actions: ${history.join("; ") || "none"}`,
-      `It finished on ${url}. Visible page text:\n"""\n${pageText.slice(0, 20_000)}\n"""`,
-      "Concisely report the outcome. If the goal asked for information, answer it from the page text. If the page text doesn't support an answer, say so.",
-    ].join("\n\n"),
+  const answers = await decide({
+    model,
+    state: {
+      goal,
+      field: describeElement(target),
+      previous_actions: history.slice(-5),
+    },
+    questions: {
+      fact: {
+        type: "choice",
+        instructions:
+          "Which of these values should be typed into the field to achieve the goal?",
+        criteria: {
+          ...R.mapValues(facts, (value) => `Type "${value}"`),
+          __none__: "None of these values belongs in this field",
+        },
+      },
+    },
   })
-  return text.trim()
+  const text = answers.fact && facts[answers.fact.choice]
+  if (text == null) throw needsText
+  return text
 }
