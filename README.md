@@ -2,11 +2,28 @@
 
 [![npm](https://img.shields.io/npm/v/clef-browser)](https://www.npmjs.com/package/clef-browser)
 
+**Agents finish multi-step browser tasks in 51–77% less time (2–4× faster) than with screenshot-driven browser control.**
+
 Fast, cheap browser actions for agents. A decision model — Cloudflare's [Clef](https://developers.cloudflare.com/workers-ai/models/clef/) or TypeSafe's Jev — picks each action and element in your real, logged-in Chrome; a smarter agent plans the goals. No LLM in the loop. Runs in parallel background tabs, via CLI or MCP.
 
 ## Benchmarks
 
-Average time per goal, from start page to done (5 runs per decision-model cell, 1 run for Sonnet). ✗ = failed every run.
+### Agent tasks: Sonnet + clef-browser vs Sonnet + Claude in Chrome
+
+Each task needs ~3 sub-goals. Same model (Sonnet), same prompt; one side drives `browser_run` (Jev) and finishes stuck steps itself, the other uses Claude in Chrome. Average of 2 runs each; all 16 runs answered correctly.
+
+| Task                                                       | clef-browser | Claude in Chrome | Time saved |
+| ---------------------------------------------------------- | ------------ | ---------------- | ---------- |
+| GitHub: latest commit → file at that commit → read a value | **28.2s**    | 57.3s            | 51%        |
+| Wikipedia fact → fill + submit a form on another site      | **24.9s**    | 55.8s            | 55%        |
+| GitHub releases → latest release → tag + date              | **17.5s**    | 74.7s            | 77%        |
+| Google Flights: one-way search → cheapest nonstop          | **41.1s**    | 104.6s           | 61%        |
+
+The agent also used about half as many tool calls (10.6 vs 19.5 per task).
+
+### Single goals: decision models alone
+
+Time per goal, from start page to done (5 runs per decision-model cell, 1 run for Sonnet). ✗ = failed every run.
 
 | Goal                      | Jev (text) | Clef (text) | Clef (vision) | Sonnet + Claude in Chrome |
 | ------------------------- | ---------- | ----------- | ------------- | ------------------------- |
@@ -17,7 +34,7 @@ Average time per goal, from start page to done (5 runs per decision-model cell, 
 | Find a story across pages | **4.5s**   | ✗           | ✗             | 74.6s                     |
 | Google Flights search     | ✗          | ✗           | ✗             | **56.0s**                 |
 
-Sonnet times exclude ~15s of agent startup. Also passing in single-run ceiling tests: 10-part navigation, 4-step "read then follow" chains, 8-field forms with dropdowns/checkboxes/radios, numeric comparisons, and returning `blocked` for impossible goals. Reproduce with `bun bench/run.ts --levels 1,2,4,14,18,5 --reps 5`.
+Sonnet times exclude ~15s of agent startup. Also passing in single-run ceiling tests: 10-part navigation, 4-step "read then follow" chains, 8-field forms with dropdowns/checkboxes/radios, numeric comparisons, and returning `blocked` for impossible goals. Where a single goal fails (Google Flights), the agent finishes it with `browser_look` / `browser_click` — still 61% faster end to end. Reproduce the single-goal table with `bun bench/run.ts --levels 1,2,4,14,18,5 --reps 5`.
 
 ## Scoping goals
 

@@ -271,7 +271,7 @@ async function chooseFact(
         instructions:
           "Which of these values should be typed into the field to achieve the goal?",
         criteria: {
-          ...R.mapValues(facts, (value) => `Type "${value}"`),
+          ...R.mapValues(facts, (value, key) => `${key}: type "${value}"`),
           __none__: "None of these values belongs in this field",
         },
       },
