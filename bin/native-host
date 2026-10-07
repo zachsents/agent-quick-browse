@@ -1,3 +1,0 @@
-#!/bin/sh
-# Launched by Chrome via native messaging (see `clef-browser setup`)
-exec "$HOME/.bun/bin/bun" "$(dirname "$0")/../src/host.ts" "$@"

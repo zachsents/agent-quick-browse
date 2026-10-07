@@ -25,33 +25,33 @@ Sonnet times exclude ~15s of agent startup. Also passing in single-run ceiling t
 
 ## Setup
 
-Requires macOS, Google Chrome, [Bun](https://bun.sh), and a [Vercel AI Gateway](https://vercel.com/ai-gateway) key. Paste this to your coding agent (Claude Code, Codex, Cursor, …):
+Requires macOS, Google Chrome, [Bun](https://bun.sh), and a [Vercel AI Gateway](https://vercel.com/ai-gateway) key. Published on npm as [`clef-browser`](https://www.npmjs.com/package/clef-browser). Paste this to your coding agent (Claude Code, Codex, Cursor, …):
 
 ```text
-Set up the clef-browser MCP server from https://github.com/zachsents/clef-browser for me:
+Set up the clef-browser MCP server (https://github.com/zachsents/clef-browser) for me:
 
-1. Clone it to ~/code/clef-browser and run: bun install && bun link && clef-browser setup
+1. Run: bunx clef-browser@latest setup
 2. Tell me to open chrome://extensions, turn on Developer mode, click "Load unpacked" and pick
-   ~/code/clef-browser/extension. Wait until I confirm.
+   ~/.clef-browser/extension. Wait until I confirm.
 3. Check that AI_GATEWAY_API_KEY is exported in ~/.zprofile (login shells read that, not ~/.zshrc).
    If it isn't, ask me to add it myself — never ask me to paste the key into chat.
 4. Register the MCP server, launched through a login shell so it picks up that key. For Claude Code:
-   claude mcp add -s user clef-browser -- zsh -lc "exec ~/.bun/bin/bun ~/code/clef-browser/src/index.ts mcp"
+   claude mcp add -s user clef-browser -- zsh -lc "exec ~/.bun/bin/bun x clef-browser@latest mcp"
    For other agents, add an MCP server with command `zsh` and
-   args ["-lc", "exec ~/.bun/bin/bun ~/code/clef-browser/src/index.ts mcp"].
-5. Verify: clef-browser run "Open the Ask HN page" --url https://news.ycombinator.com
+   args ["-lc", "exec ~/.bun/bin/bun x clef-browser@latest mcp"].
+5. Verify: bunx clef-browser run "Open the Ask HN page" --url https://news.ycombinator.com
    It should print JSON with "status":"done" and a url ending in /ask. Then tell me to restart
    my agent session so the browser_* tools load.
 ```
 
-Optional: set `CLOUDFLARE_AI_ACCOUNT_ID` and `CLOUDFLARE_AI_API_TOKEN` (a Workers AI token) to use the Clef models.
+Optional: set `CLOUDFLARE_AI_ACCOUNT_ID` and `CLOUDFLARE_AI_API_TOKEN` (a Workers AI token) to use the Clef models. After upgrading, re-run `bunx clef-browser@latest setup` and reload the extension.
 
 ## Usage
 
 ```sh
-clef-browser run "search for Cloudflare and open its article" --url https://en.wikipedia.org --fact search=Cloudflare
-clef-browser look --text          # what the model sees
-clef-browser mcp                  # MCP server: browser_run, browser_look, browser_click, browser_type, …
+bunx clef-browser run "search for Cloudflare and open its article" --url https://en.wikipedia.org --fact search=Cloudflare
+bunx clef-browser look --text     # what the model sees
+bunx clef-browser mcp             # MCP server: browser_run, browser_look, browser_click, browser_type, …
 ```
 
 Each `--session` (or MCP session) gets its own background tab; omit `--url` to continue where it left off.

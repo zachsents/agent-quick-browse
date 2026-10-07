@@ -1,10 +1,11 @@
 #!/usr/bin/env bun
+import { chmodSync, cpSync, mkdirSync, rmSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { parseArgs } from "node:util"
 import { z } from "zod"
 import { runAgent } from "./agent.ts"
-import { EXTENSION_ID, HOST_NAME } from "./paths.ts"
+import { EXTENSION_ID, HOST_NAME, STATE_DIR } from "./paths.ts"
 import { describeElement, snapshotPage } from "./snapshot.ts"
 import * as tab from "./tab.ts"
 
@@ -61,11 +62,34 @@ switch (command) {
 }
 
 /**
- * Writes Chrome's native messaging manifest so the extension can launch
- * bin/native-host.
+ * Installs the native host and extension into ~/.clef-browser (stable paths,
+ * even when run from bunx's temporary cache) and registers the host with
+ * Chrome. Re-run after upgrading.
  */
 async function setup() {
   const projectRoot = resolve(import.meta.dir, "..")
+  mkdirSync(STATE_DIR, { recursive: true, mode: 0o700 })
+
+  // Bundle the host so it no longer depends on this package's location
+  const build = await Bun.build({
+    entrypoints: [join(projectRoot, "src/host.ts")],
+    outdir: STATE_DIR,
+    target: "bun",
+    naming: "host.js",
+  })
+  if (!build.success)
+    throw new AggregateError(build.logs, "Failed to bundle the native host")
+  const launcher = join(STATE_DIR, "native-host")
+  await Bun.write(
+    launcher,
+    `#!/bin/sh\nexec "${process.execPath}" "${join(STATE_DIR, "host.js")}"\n`,
+  )
+  chmodSync(launcher, 0o755)
+
+  const extensionDir = join(STATE_DIR, "extension")
+  rmSync(extensionDir, { recursive: true, force: true })
+  cpSync(join(projectRoot, "extension"), extensionDir, { recursive: true })
+
   const manifestPath = join(
     homedir(),
     "Library/Application Support/Google/Chrome/NativeMessagingHosts",
@@ -77,7 +101,7 @@ async function setup() {
       {
         name: HOST_NAME,
         description: "clef-browser native host",
-        path: join(projectRoot, "bin/native-host"),
+        path: launcher,
         type: "stdio",
         allowed_origins: [`chrome-extension://${EXTENSION_ID}/`],
       },
@@ -85,14 +109,15 @@ async function setup() {
       2,
     ),
   )
-  console.log(`Wrote ${manifestPath}
+  console.log(`Installed the native host and extension in ${STATE_DIR}
 
-Now load the extension once:
+If you haven't already, load the extension once:
   1. Open chrome://extensions and turn on Developer mode
-  2. Load unpacked → ${join(projectRoot, "extension")}
+  2. Load unpacked → ${extensionDir}
   3. Check it shows ID ${EXTENSION_ID}
+After upgrading, re-run setup and click the extension's reload button.
 
-Then try: clef-browser look --url https://news.ycombinator.com`)
+Then try: clef-browser run "Open the Ask HN page" --url https://news.ycombinator.com`)
 }
 
 async function look() {

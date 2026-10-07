@@ -19,5 +19,5 @@
     "noPropertyAccessFromIndexSignature": false,
     "types": ["bun"]
   },
-  "include": ["src/**/*.ts", "bench/**/*.ts"]
+  "include": ["src/**/*.ts", "bench/**/*.ts", "scripts/**/*.ts"]
 }
