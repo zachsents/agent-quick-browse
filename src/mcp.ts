@@ -12,7 +12,19 @@ import * as tab from "./tab.ts"
  * own default session; pass `session` to run several tabs in parallel.
  */
 export async function startMcp() {
-  const server = new McpServer({ name: "clef-browser", version: "0.2.0" })
+  const server = new McpServer(
+    { name: "clef-browser", version: "0.2.0" },
+    {
+      // Shown to the agent alongside every tool (Claude Code puts it in the system prompt): the cross-tool policy
+      instructions: `clef-browser drives the user's real, logged-in Chrome with a fast decision model, in background tabs that don't disturb the user.
+
+Prefer browser_run for routine web tasks (navigating, searching, following links, filling and submitting forms, multi-step clicking) over screenshot-driven browser control: it is 2–7x faster in benchmarks and already has the user's logins.
+
+Give browser_run one objective on one site with explicit steps, put any text to type in facts, and check status and url before the next step. Read results with browser_page_text or browser_look; finish stuck steps with browser_click / browser_type. Use another browser tool for visual judgment, dragging or drawing, or when clef-browser is blocked.
+
+Ask the user before anything that purchases, sends, posts, deletes, or submits.`,
+    },
+  )
   const defaultSession = `mcp-${crypto.randomUUID().slice(0, 8)}`
   const sessionArg = {
     session: z
@@ -31,21 +43,12 @@ export async function startMcp() {
   server.registerTool(
     "browser_run",
     {
-      description: `Hand a small, concrete browser sub-goal to a fast, cheap decision model (Clef: ~1–2s per step, sees screenshots; Jev: ~0.5s per step, reads a text outline). It works in the user's real, logged-in Chrome, in a background agent tab that persists between calls: each call continues from wherever the previous call (or browser_navigate/click/type) left off in the same session. Links that open a new tab hand the session to that tab.
-
-These models only choose between options (which action, which element). How to scope goals, from benchmarks (see README):
-- Reliable in one call: one objective on one site, stated with explicit steps. E.g. "search for X and open the matching result"; "fill the form with these facts, pick Two in the dropdown, check Y, submit"; navigation chains of up to ~10 explicit parts ("open folder A, open file B, go back, open C"); following links by what the page says ("open the article on its creator, then the city he was born in"); simple comparisons ("open the story with the most points"). An impossible goal returns "blocked" rather than a fake "done".
-- Split up or do yourself: complex app widget flows (date pickers, multi-field search UIs like Google Flights) — the model tends to say "done" before the final submit, so verify and finish with browser_click; exploring for something that isn't on the current page (prefer jev, which pages; clef tends to scroll aimlessly); vague or judgment-heavy goals; anything needing writing or reading comprehension.
-- Every string that must be typed (search terms, dates, emails) goes in facts. Name exact link/button text when you know it.
-- Always check the result (status, reason, url, title, actions) before the next call; "done" is the model's belief, not proof. Runs return no text answer — read pages yourself with browser_page_text or browser_look, and use browser_look / browser_click / browser_type when a run gets stuck.
-- jev is ~2–3× faster than clef and at least as accurate on most goals; use clef (vision) when the page is mostly visual.
-
-The model can click anything the user is logged into. Do not give it goals that purchase, send, post, delete, or submit forms without the user's go-ahead.`,
+      description: `Have a fast decision model (Jev ~0.5s/step, Clef ~1–2s/step) do one small web task (navigate, search, click, fill forms) in the user's real, logged-in Chrome. Runs in a background tab that persists per session: omit url to continue where the last call left off. Returns {status, reason, url, title, actions} and no text answer — read pages yourself with browser_page_text or browser_look. "done" is the model's belief, so check the result before the next call, and finish stuck steps yourself with browser_click / browser_type. Never give it goals that purchase, send, post, delete, or submit without the user's go-ahead.`,
       inputSchema: {
         goal: z
           .string()
           .describe(
-            "One objective on one site, with explicit steps (see scoping guidance above)",
+            `One objective on one site, with explicit steps. Reliable: "search for X and open the result", "fill the form with these facts and submit", up to ~10 explicit navigation steps ("open folder A, open file B, go back, open C"), simple comparisons ("open the story with the most points"). Split up or do yourself: multi-widget app flows like date pickers or Google Flights (it may stop before the final submit), open-ended exploration, judgment calls, writing. Name exact link/button text when you know it.`,
           ),
         url: z
           .string()

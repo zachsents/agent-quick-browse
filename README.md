@@ -42,8 +42,12 @@ Set up the clef-browser MCP server (https://github.com/zachsents/clef-browser) f
    For other agents, add an MCP server with command `zsh` and
    args ["-lc", "exec ~/.bun/bin/bun x clef-browser@latest mcp"].
 5. Verify: bunx clef-browser run "Open the Ask HN page" --url https://news.ycombinator.com
-   It should print JSON with "status":"done" and a url ending in /ask. Then tell me to restart
-   my agent session so the browser_* tools load.
+   It should print JSON with "status":"done" and a url ending in /ask.
+6. Ask me whether to add this line to my global agent instructions (~/.claude/CLAUDE.md for
+   Claude Code, ~/.codex/AGENTS.md or similar for other agents), and only add it if I say yes:
+   "For routine web tasks (navigating, searching, filling forms), prefer the clef-browser MCP's
+   browser_run over other browser tools; use those for visual work or when clef-browser is blocked."
+7. Tell me to restart my agent session so the browser_* tools load.
 ```
 
 Optional: set `CLOUDFLARE_AI_ACCOUNT_ID` and `CLOUDFLARE_AI_API_TOKEN` (a Workers AI token) to use the Clef models. After upgrading, re-run `bunx clef-browser@latest setup` and reload the extension.
