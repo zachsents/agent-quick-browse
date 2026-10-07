@@ -1,5 +1,7 @@
 # clef-browser
 
+[![npm](https://img.shields.io/npm/v/clef-browser)](https://www.npmjs.com/package/clef-browser)
+
 Fast, cheap browser actions for agents. A decision model — Cloudflare's [Clef](https://developers.cloudflare.com/workers-ai/models/clef/) or TypeSafe's Jev — picks each action and element in your real, logged-in Chrome; a smarter agent plans the goals. No LLM in the loop. Runs in parallel background tabs, via CLI or MCP.
 
 ## Benchmarks
