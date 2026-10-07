@@ -34,7 +34,7 @@ Time per goal, from start page to done (5 runs per decision-model cell, 1 run fo
 | Find a story across pages | **4.5s**   | ✗           | ✗             | 74.6s                     |
 | Google Flights search     | ✗          | ✗           | ✗             | **56.0s**                 |
 
-Sonnet times exclude ~15s of agent startup. Also passing in single-run ceiling tests: 10-part navigation, 4-step "read then follow" chains, 8-field forms with dropdowns/checkboxes/radios, numeric comparisons, and returning `blocked` for impossible goals. Where a single goal fails (Google Flights), the agent finishes it with `browser_look` / `browser_click` — still 61% faster end to end. Reproduce the single-goal table with `bun bench/run.ts --levels 1,2,4,14,18,5 --reps 5`.
+Sonnet times exclude ~15s of agent startup. Also passing in single-run ceiling tests: 10-part navigation, 4-step "read then follow" chains, 8-field forms with dropdowns/checkboxes/radios, numeric comparisons, hover-only controls (row buttons revealed on hover, hover menus, `mouseenter` menus — 6/6 with `bun bench/hover.ts`, 0/6 before the hover action), and returning `blocked` for impossible goals. Where a single goal fails (Google Flights), the agent finishes it with `browser_look` / `browser_click` — still 61% faster end to end. Reproduce the single-goal table with `bun bench/run.ts --levels 1,2,4,14,18,5 --reps 5`.
 
 ## Scoping goals
 
@@ -74,7 +74,7 @@ Optional: set `CLOUDFLARE_AI_ACCOUNT_ID` and `CLOUDFLARE_AI_API_TOKEN` (a Worker
 ```sh
 bunx clef-browser run "search for Cloudflare and open its article" --url https://en.wikipedia.org --fact search=Cloudflare
 bunx clef-browser look --text     # what the model sees
-bunx clef-browser mcp             # MCP server: browser_run, browser_look, browser_click, browser_type, …
+bunx clef-browser mcp             # MCP server: browser_run, browser_look, browser_click, browser_type, browser_hover, …
 ```
 
 Each `--session` (or MCP session) gets its own background tab; omit `--url` to continue where it left off.

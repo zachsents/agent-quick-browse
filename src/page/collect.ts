@@ -62,29 +62,35 @@ export function collect({
   for (const el of document.querySelectorAll("[data-clef-id]"))
     el.removeAttribute("data-clef-id")
 
+  // Controls hidden with opacity/visibility (not display:none) that sit in the viewport usually appear on hover
+  const hoverOnly = new Set<Element>()
   const candidates = new Set(
     [...document.querySelectorAll(selector)].filter((el): el is HTMLElement => {
-      if (!(el instanceof HTMLElement)) return false
-      if (
-        !el.checkVisibility({ opacityProperty: true, visibilityProperty: true })
-      )
-        return false
+      if (!(el instanceof HTMLElement) || !el.checkVisibility()) return false
       const r = el.getBoundingClientRect()
       if (r.width < 4 || r.height < 4) return false
-      if (!inViewport(r)) return mode === "text"
+      const shown = el.checkVisibility({
+        opacityProperty: true,
+        visibilityProperty: true,
+      })
+      if (!inViewport(r)) return shown && mode === "text"
       // Drop on-screen elements covered by something else (modals, sticky headers)
       const hit = document.elementFromPoint(
         r.left + r.width / 2,
         r.top + r.height / 2,
       )
-      return !!hit && (el.contains(hit) || hit.contains(el))
+      if (!hit || !(el.contains(hit) || hit.contains(el))) return false
+      if (!shown) hoverOnly.add(el)
+      return true
     }),
   )
-  // Prefer the innermost match so a <div onclick> wrapping a <button> doesn't produce two entries
+  // Prefer the innermost match so a <div onclick> wrapping a <button> doesn't produce two entries. Only visible
+  // descendants count, so a row isn't dropped in favor of its hover-only buttons.
   const leaves = [...candidates].filter(
     (el) =>
       ![...el.querySelectorAll(selector)].some(
-        (d) => d instanceof HTMLElement && candidates.has(d),
+        (d) =>
+          d instanceof HTMLElement && candidates.has(d) && !hoverOnly.has(d),
       ),
   )
   const kept = new Set(
@@ -134,6 +140,7 @@ export function collect({
         el.getAttribute("aria-disabled") === "true") &&
         "disabled",
       document.activeElement === el && "focused",
+      hoverOnly.has(el) && "shows on hover",
     ].filter(Boolean)
     const r = el.getBoundingClientRect()
     const screens = Math.max(1, Math.round(distance(el) / innerHeight))
@@ -176,7 +183,7 @@ export function collect({
     for (const [i, el] of targets.entries()) {
       const r = el.getBoundingClientRect()
       const box = document.createElement("div")
-      box.style.cssText = `position:fixed;left:${r.left}px;top:${r.top}px;width:${r.width}px;height:${r.height}px;outline:2px solid #e11d48;`
+      box.style.cssText = `position:fixed;left:${r.left}px;top:${r.top}px;width:${r.width}px;height:${r.height}px;outline:2px ${hoverOnly.has(el) ? "dashed" : "solid"} #e11d48;`
       const tag = document.createElement("span")
       tag.textContent = String(i + 1)
       tag.style.cssText =
@@ -252,8 +259,12 @@ export function collect({
       const indent = "  ".repeat(depth)
       const id = child.getAttribute("data-clef-id")
       if (id) {
-        // Inline with surrounding text so a row like `1. [13] link "Title" (example.com) 42 points` stays together
-        pending += ` ${lineFor.get(id)} `
+        // Inline with surrounding text so a row like `1. [13] link "Title" (example.com) 42 points` stays together.
+        // Numbered controls nested inside (e.g. a row's hover-only buttons) follow it, since the row's subtree is skipped.
+        const nested = [...child.querySelectorAll("[data-clef-id]")].map((el) =>
+          lineFor.get(el.getAttribute("data-clef-id") ?? ""),
+        )
+        pending += ` ${[lineFor.get(id), ...nested].join(" ")} `
         continue
       }
       const level = /^H[1-6]$/.test(child.tagName)

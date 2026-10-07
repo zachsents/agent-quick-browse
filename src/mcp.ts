@@ -181,6 +181,20 @@ Ask the user before anything that purchases, sends, posts, deletes, or submits.`
   )
 
   server.registerTool(
+    "browser_hover",
+    {
+      description:
+        "Move the mouse onto a numbered element from the latest browser_look and leave it there, to reveal controls or menus that only appear on hover. Look again afterwards to see them.",
+      inputSchema: { element: z.number().int().min(1), ...sessionArg },
+    },
+    inSession(async ({ element }) => {
+      await tab.hover(`e${element}`)
+      await tab.waitForLoad()
+      return pageInfo()
+    }),
+  )
+
+  server.registerTool(
     "browser_scroll",
     {
       description: "Scroll the session's tab by ~one screen.",

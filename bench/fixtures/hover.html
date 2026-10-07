@@ -1,0 +1,72 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Hover test</title>
+<style>
+  body {
+    font: 16px system-ui;
+    margin: 24px;
+  }
+  .row,
+  .card,
+  #account {
+    padding: 12px;
+    border: 1px solid #ccc;
+    margin: 8px 0;
+    display: flex;
+    gap: 12px;
+    align-items: center;
+  }
+  .row .del {
+    opacity: 0;
+    transition: opacity 0.15s;
+  }
+  .row:hover .del {
+    opacity: 1;
+  }
+  .card .menu {
+    display: none;
+  }
+  .card:hover .menu {
+    display: block;
+  }
+</style>
+<h1>Hover test</h1>
+<p>Status: <b id="result">nothing yet</b></p>
+<!--
+  Clicking a row, card, or the account trigger "opens" it — the wrong move, like clicking a Gmail row. The right move is
+  to hover and click the revealed control. Only the first outcome counts (data-first).
+-->
+<div class="row" tabindex="0" data-name="A">
+  Item A <button class="del" data-action="deleted A">Delete</button>
+</div>
+<div class="row" tabindex="0" data-name="B">
+  Item B <button class="del" data-action="deleted B">Delete</button>
+</div>
+<div class="card" tabindex="0" data-name="project X">
+  Project X
+  <div class="menu"><button data-action="archived X">Archive</button></div>
+</div>
+<div id="account" tabindex="0" data-name="account page">Account ▾</div>
+<script>
+  const result = document.getElementById("result")
+  const account = document.getElementById("account")
+  const report = (text) => {
+    result.dataset.first ??= text
+    result.textContent = text
+  }
+  document.addEventListener("click", (event) => {
+    const action = event.target.closest("[data-action]")
+    if (action) return report(action.dataset.action)
+    const opened = event.target.closest("[data-name]")
+    if (opened) report(`opened ${opened.dataset.name}`)
+  })
+  account.addEventListener("mouseenter", () => {
+    if (document.getElementById("settings")) return
+    const button = Object.assign(document.createElement("button"), {
+      id: "settings",
+      textContent: "Settings",
+    })
+    button.dataset.action = "opened settings"
+    account.append(button)
+  })
+</script>

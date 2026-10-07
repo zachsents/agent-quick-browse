@@ -196,10 +196,52 @@ async function elementCenter(id: string) {
   )
 }
 
-/** Real (trusted) mouse click via CDP input events. */
+/**
+ * Last pointer position per session, so movement starts where the mouse
+ * actually is.
+ */
+const pointers = new Map<string, { x: number; y: number }>()
+
+/**
+ * Glides the mouse to (x, y) at roughly human speed (100–500ms depending on
+ * distance, eased in and out) with a mouseMoved event per ~16ms frame, so
+ * elements along the path get real hover, mouseenter, and mouseleave events.
+ */
+async function movePointer(x: number, y: number) {
+  const session = sessionStore.getStore() ?? "default"
+  const from = pointers.get(session) ?? { x, y }
+  const duration = Math.min(500, 100 + Math.hypot(x - from.x, y - from.y) * 0.4)
+  const frames = Math.max(1, Math.round(duration / 16))
+  const started = performance.now()
+  for (let frame = 1; frame <= frames; frame++) {
+    const t = frame / frames
+    const eased = t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2
+    await cdp("Input.dispatchMouseEvent", {
+      type: "mouseMoved",
+      x: from.x + (x - from.x) * eased,
+      y: from.y + (y - from.y) * eased,
+    })
+    await Bun.sleep(Math.max(0, started + t * duration - performance.now()))
+  }
+  pointers.set(session, { x, y })
+}
+
+/**
+ * Moves the mouse onto the element and leaves it there, revealing hover-only
+ * controls and menus.
+ */
+export async function hover(id: string) {
+  const { x, y } = await elementCenter(id)
+  await movePointer(x, y)
+}
+
+/**
+ * Real (trusted) mouse click via CDP input events, after gliding the pointer
+ * onto the element.
+ */
 export async function click(id: string) {
   const { x, y } = await elementCenter(id)
-  await cdp("Input.dispatchMouseEvent", { type: "mouseMoved", x, y })
+  await movePointer(x, y)
   await cdp("Input.dispatchMouseEvent", {
     type: "mousePressed",
     x,

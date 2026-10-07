@@ -12,6 +12,8 @@ const ACTIONS = {
   click:
     "Click the numbered element that best advances the goal (link, button, tab, checkbox, result, etc.).",
   type: "Type one of the provided facts into a numbered text field / search box, or pick an option in a numbered dropdown. Only if that field doesn't already hold the right value.",
+  hover:
+    "Hover the mouse over the numbered element (a row, card, or menu) to reveal controls or a menu that only appear on hover.",
   press_enter:
     "Press Enter to submit text that was just typed (e.g. a search box with no visible submit button).",
   scroll_down: "Scroll down because what is needed is not visible yet.",
@@ -81,7 +83,7 @@ export async function runAgent({
           target: {
             type: "choice",
             instructions:
-              "If the next action is a click or typing, which numbered element should it act on? Pick the one that most directly advances the goal.",
+              "If the next action is a click, typing, or hover, which numbered element should it act on? Pick the one that most directly advances the goal.",
             criteria: R.fromEntries(
               R.zip(R.map(elements, R.prop("id")), descriptions),
             ),
@@ -175,7 +177,7 @@ function isAction(choice: string): choice is Action {
 }
 
 function needsTarget(action: Action) {
-  return action === "click" || action === "type"
+  return action === "click" || action === "type" || action === "hover"
 }
 
 async function perform(
@@ -200,6 +202,9 @@ async function perform(
       ctx.log(`  type "${text}"`)
       return tab.fill(target.id, text)
     }
+    case "hover":
+      if (!target) throw new Error("no element to hover")
+      return tab.hover(target.id)
     case "press_enter":
       return tab.pressEnter()
     case "scroll_down":

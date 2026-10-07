@@ -193,7 +193,7 @@ export const TRIALS: Trial[] = [
   {
     level: 14,
     name: "7-part goal",
-    goal: "In the zachsents/clef-browser repository: open the bin folder, open native-host, go back to the repository main page, open the extension folder, open background.js, go back to the repository main page, then open package.json",
+    goal: "In the zachsents/clef-browser repository: open the scripts folder, open next-version.ts, go back to the repository main page, open the extension folder, open background.js, go back to the repository main page, then open package.json",
     url: "https://github.com/zachsents/clef-browser",
     maxSteps: 18,
     check: ({ url }) =>
