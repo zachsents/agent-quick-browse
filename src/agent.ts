@@ -109,7 +109,10 @@ export async function runAgent({
     if (action === "blocked") return finish("blocked", history)
 
     try {
+      const actionStarted = performance.now()
       await perform(action, target, ctx)
+      const actionMs = Math.round(performance.now() - actionStarted)
+      if (actionMs > 1000) log(`  (action took ${actionMs}ms)`)
       history.push(summary)
       if (
         history.length >= 3 &&

@@ -169,21 +169,62 @@ export async function screenshot() {
   return `data:image/jpeg;base64,${data}`
 }
 
+const scrollMovesSchema = z.array(
+  z.object({
+    id: z.string(),
+    from: z.tuple([z.number(), z.number()]),
+    to: z.tuple([z.number(), z.number()]),
+  }),
+)
+
 /**
- * Scrolls the tagged element into view and returns a point that actually hits
- * it. Uses the element's individual line boxes, because the bounding-box center
- * of a link that wraps onto two lines falls in the gap between them.
+ * Scrolls the tagged element into view with an animation driven from here
+ * (~300ms of eased frames), then returns a point that actually hits it.
+ * Chrome's own smooth scrolling crawls in hidden background tabs, so the page
+ * only computes where each scroll container needs to end up and we step them
+ * there. The hit point uses the element's individual line boxes, because the
+ * bounding-box center of a link that wraps onto two lines falls in the gap.
  */
 async function elementCenter(id: string) {
-  return rectSchema.parse(
+  const moves = scrollMovesSchema.parse(
     await evaluate((clefId) => {
       const el = document.querySelector(`[data-clef-id="${clefId}"]`)
       if (!el) throw new Error(`element ${clefId} is gone`)
+      const r = el.getBoundingClientRect()
+      if (
+        r.top >= 0 &&
+        r.left >= 0 &&
+        r.bottom <= innerHeight &&
+        r.right <= innerWidth
+      )
+        return []
+      const scrollers: Element[] = []
+      for (let parent = el.parentElement; parent; parent = parent.parentElement)
+        scrollers.push(parent)
+      const before = scrollers.map((s) => [s.scrollLeft, s.scrollTop] as const)
       el.scrollIntoView({
         block: "center",
         inline: "center",
         behavior: "instant",
       })
+      // Record each container's destination, then put it back so the animation can play from the start
+      return scrollers.flatMap((s, i) => {
+        const [left, top] = before[i] ?? [0, 0]
+        if (s.scrollLeft === left && s.scrollTop === top) return []
+        const to = [s.scrollLeft, s.scrollTop]
+        s.scrollLeft = left
+        s.scrollTop = top
+        s.setAttribute("data-clef-scroll", String(i))
+        return [{ id: String(i), from: [left, top], to }]
+      })
+    }, id),
+  )
+  if (moves.length) await animateScroll(moves)
+
+  return rectSchema.parse(
+    await evaluate((clefId) => {
+      const el = document.querySelector(`[data-clef-id="${clefId}"]`)
+      if (!el) throw new Error(`element ${clefId} is gone`)
       const centers = [...el.getClientRects(), el.getBoundingClientRect()]
         .filter((r) => r.width > 0 && r.height > 0)
         .map((r) => ({ x: r.left + r.width / 2, y: r.top + r.height / 2 }))
@@ -194,6 +235,32 @@ async function elementCenter(id: string) {
       return hits ?? centers.at(-1)
     }, id),
   )
+}
+
+/**
+ * Steps the given scroll containers from their start to end positions over
+ * ~300ms of eased frames.
+ */
+async function animateScroll(moves: z.infer<typeof scrollMovesSchema>) {
+  const frames = 18
+  const started = performance.now()
+  for (let frame = 1; frame <= frames; frame++) {
+    const t = frame / frames
+    const eased = t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2
+    await evaluate(
+      ({ moves, eased, last }) => {
+        for (const { id, from, to } of moves) {
+          const el = document.querySelector(`[data-clef-scroll="${id}"]`)
+          if (!el) continue
+          el.scrollLeft = from[0] + (to[0] - from[0]) * eased
+          el.scrollTop = from[1] + (to[1] - from[1]) * eased
+          if (last) el.removeAttribute("data-clef-scroll")
+        }
+      },
+      { moves, eased, last: frame === frames },
+    )
+    await Bun.sleep(Math.max(0, started + t * 300 - performance.now()))
+  }
 }
 
 /**
@@ -309,11 +376,50 @@ export async function pressEnter() {
   await cdp("Input.dispatchKeyEvent", { type: "keyUp", ...key })
 }
 
+/**
+ * Scrolls ~80% of a screen with real mouse-wheel events at the pointer, eased
+ * over ~300ms. Like a person's scroll, it moves whatever is under the mouse
+ * (e.g. Gmail's message list) and triggers infinite scroll / lazy loading.
+ */
 export async function scroll(direction: 1 | -1) {
-  await evaluate(
-    (dir) => scrollBy({ top: dir * innerHeight * 0.8, behavior: "instant" }),
-    direction,
+  const viewport = z
+    .object({ width: z.number(), height: z.number() })
+    .parse(await evaluate(() => ({ width: innerWidth, height: innerHeight })))
+  const session = sessionStore.getStore() ?? "default"
+  const center = { x: viewport.width / 2, y: viewport.height / 2 }
+  const pointer = pointers.get(session) ?? center
+  // Like a person, move the mouse over the content first if nothing under it can scroll
+  const canScrollHere = z.boolean().parse(
+    await evaluate(({ x, y }) => {
+      for (let el = document.elementFromPoint(x, y); el; el = el.parentElement)
+        if (
+          el.scrollHeight > el.clientHeight + 1 &&
+          /(auto|scroll)/.test(getComputedStyle(el).overflowY)
+        )
+          return true
+      const root = document.scrollingElement
+      return !!root && root.scrollHeight > root.clientHeight + 1
+    }, pointer),
   )
+  if (!canScrollHere) await movePointer(center.x, center.y)
+  const { x, y } = canScrollHere ? pointer : center
+  const total = direction * viewport.height * 0.8
+  const frames = 18
+  const started = performance.now()
+  let scrolled = 0
+  for (let frame = 1; frame <= frames; frame++) {
+    const t = frame / frames
+    const target = total * (t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2)
+    await cdp("Input.dispatchMouseEvent", {
+      type: "mouseWheel",
+      x,
+      y,
+      deltaX: 0,
+      deltaY: target - scrolled,
+    })
+    scrolled = target
+    await Bun.sleep(Math.max(0, started + t * 300 - performance.now()))
+  }
 }
 
 export async function goBack() {

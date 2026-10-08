@@ -23,6 +23,34 @@ function distance(el: Element) {
       : 0
 }
 
+/**
+ * Elements where a pointer cursor starts (its parent doesn't have one). Catches
+ * click targets wired up purely in JS, like Gmail's row actions (`<li
+ * data-tooltip="Archive">`), which no role/tag selector matches. The cursor is
+ * inherited, so only the outermost element of each pointer region is taken.
+ */
+function pointerTargets() {
+  return [...document.body.querySelectorAll("*")].filter(
+    (el) =>
+      el instanceof HTMLElement &&
+      getComputedStyle(el).cursor === "pointer" &&
+      // Outermost element of a pointer region, or a named control inside one (Gmail rows are all pointer)
+      (el.matches("[aria-label], [title], [data-tooltip]") ||
+        !(
+          el.parentElement &&
+          getComputedStyle(el.parentElement).cursor === "pointer"
+        )),
+  )
+}
+
+/** All ancestors of an element, nearest first. */
+function ancestors(el: Element) {
+  const chain: Element[] = []
+  for (let parent = el.parentElement; parent; parent = parent.parentElement)
+    chain.push(parent)
+  return chain
+}
+
 /** ARIA role, falling back to the implicit role of native elements. */
 function implicitRole(el: HTMLElement) {
   const explicit = el.getAttribute("role")
@@ -65,34 +93,35 @@ export function collect({
   // Controls hidden with opacity/visibility (not display:none) that sit in the viewport usually appear on hover
   const hoverOnly = new Set<Element>()
   const candidates = new Set(
-    [...document.querySelectorAll(selector)].filter((el): el is HTMLElement => {
-      if (!(el instanceof HTMLElement) || !el.checkVisibility()) return false
-      const r = el.getBoundingClientRect()
-      if (r.width < 4 || r.height < 4) return false
-      const shown = el.checkVisibility({
-        opacityProperty: true,
-        visibilityProperty: true,
-      })
-      if (!inViewport(r)) return shown && mode === "text"
-      // Drop on-screen elements covered by something else (modals, sticky headers)
-      const hit = document.elementFromPoint(
-        r.left + r.width / 2,
-        r.top + r.height / 2,
-      )
-      if (!hit || !(el.contains(hit) || hit.contains(el))) return false
-      if (!shown) hoverOnly.add(el)
-      return true
-    }),
+    [...document.querySelectorAll(selector), ...pointerTargets()].filter(
+      (el): el is HTMLElement => {
+        if (!(el instanceof HTMLElement) || !el.checkVisibility()) return false
+        const r = el.getBoundingClientRect()
+        if (r.width < 4 || r.height < 4) return false
+        const shown = el.checkVisibility({
+          opacityProperty: true,
+          visibilityProperty: true,
+        })
+        if (!inViewport(r)) return shown && mode === "text"
+        // Drop on-screen elements covered by something else (modals, sticky headers)
+        const hit = document.elementFromPoint(
+          r.left + r.width / 2,
+          r.top + r.height / 2,
+        )
+        if (!hit || !(el.contains(hit) || hit.contains(el))) return false
+        if (!shown) hoverOnly.add(el)
+        return true
+      },
+    ),
   )
   // Prefer the innermost match so a <div onclick> wrapping a <button> doesn't produce two entries. Only visible
   // descendants count, so a row isn't dropped in favor of its hover-only buttons.
-  const leaves = [...candidates].filter(
-    (el) =>
-      ![...el.querySelectorAll(selector)].some(
-        (d) =>
-          d instanceof HTMLElement && candidates.has(d) && !hoverOnly.has(d),
-      ),
+  const hasCandidateInside = new Set<Element>(
+    [...candidates]
+      .filter((el) => !hoverOnly.has(el))
+      .flatMap((el) => ancestors(el)),
   )
+  const leaves = [...candidates].filter((el) => !hasCandidateInside.has(el))
   const kept = new Set(
     [...leaves].toSorted((a, b) => distance(a) - distance(b)).slice(0, 254),
   )
@@ -113,6 +142,7 @@ export function collect({
       .join(" ")
     const parts = [
       el.getAttribute("aria-label"),
+      el.getAttribute("data-tooltip"),
       labelledBy,
       ...[...(formField?.labels ?? [])].map((l) => l.innerText),
       formField?.name && `name=${formField.name}`,
