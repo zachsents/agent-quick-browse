@@ -1,3 +1,5 @@
+<img src="extension/icons/icon-128.png" width="64" alt="" />
+
 # Agent Quick Browse (AQB)
 
 [![npm](https://img.shields.io/npm/v/agent-quick-browse)](https://www.npmjs.com/package/agent-quick-browse)
