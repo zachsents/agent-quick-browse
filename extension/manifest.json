@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
-  "name": "Clef Browser Bridge",
-  "description": "Lets the local clef-browser CLI drive a dedicated tab in this Chrome profile.",
+  "name": "Agent Quick Browse Bridge",
+  "description": "Lets the local agent-quick-browse (aqb) CLI and MCP server drive tabs in this Chrome profile.",
   "version": "0.1.0",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAyl7jdXegzTwi0DJ3QWkccWOwY4LtXxgW4300Bb/PsYU46Vnn2H8afNZJ/HOP78Vzx+phr/oq4sxfLUIaCuzyUv5eSEE/03tvU0uYsqbn70g4Ks8Wft7wK2SinCW6YO+kZHza/ZLVE3DDAt5jR5nl4hFT1xp6aKuQyAVEEcQW+8rtaG9IO8fwcrfU/lxzDTvHtmPOKl3EF2jlJMj91QBMyqCv/unCVzhU9/AX0KucpE7tVb+eaWyVCxf5TgubvQLnxb53NOsBncOp7S9Uwr9PLsA/toad0KgmlzGddmD9scVdRvx83l2X4j1ial0XKiY5EgnawZN1Sc9ckayktIPTYwIDAQAB",
   "permissions": [
@@ -12,5 +12,7 @@
     "alarms",
     "storage"
   ],
-  "background": { "service_worker": "background.js" }
+  "background": {
+    "service_worker": "background.js"
+  }
 }

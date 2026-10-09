@@ -76,7 +76,7 @@ function implicitRole(el: HTMLElement) {
 }
 
 /**
- * Tags interactive elements with `data-clef-id` and returns their descriptions,
+ * Tags interactive elements with `data-aqb-id` and returns their descriptions,
  * plus either numbered overlay boxes (vision) or a whole-page text outline
  * (text).
  */
@@ -87,9 +87,9 @@ export function collect({
   selector: string
   mode: "vision" | "text"
 }) {
-  document.getElementById("__clef_overlay")?.remove()
-  for (const el of document.querySelectorAll("[data-clef-id]"))
-    el.removeAttribute("data-clef-id")
+  document.getElementById("__aqb_overlay")?.remove()
+  for (const el of document.querySelectorAll("[data-aqb-id]"))
+    el.removeAttribute("data-aqb-id")
 
   // Controls hidden with opacity/visibility (not display:none) that sit in the viewport usually appear on hover
   const hoverOnly = new Set<Element>()
@@ -130,7 +130,7 @@ export function collect({
 
   const elements = targets.map((el, i) => {
     const id = `e${i + 1}`
-    el.setAttribute("data-clef-id", id)
+    el.setAttribute("data-aqb-id", id)
     const input =
       el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement
         ? el
@@ -207,7 +207,7 @@ export function collect({
 
   if (mode === "vision") {
     const overlay = document.createElement("div")
-    overlay.id = "__clef_overlay"
+    overlay.id = "__aqb_overlay"
     overlay.style.cssText =
       "position:fixed;inset:0;pointer-events:none;z-index:2147483647"
     document.documentElement.append(overlay)
@@ -288,12 +288,12 @@ export function collect({
         continue
 
       const indent = "  ".repeat(depth)
-      const id = child.getAttribute("data-clef-id")
+      const id = child.getAttribute("data-aqb-id")
       if (id) {
         // Inline with surrounding text so a row like `1. [13] link "Title" (example.com) 42 points` stays together.
         // Numbered controls nested inside (e.g. a row's hover-only buttons) follow it, since the row's subtree is skipped.
-        const nested = [...child.querySelectorAll("[data-clef-id]")].map((el) =>
-          lineFor.get(el.getAttribute("data-clef-id") ?? ""),
+        const nested = [...child.querySelectorAll("[data-aqb-id]")].map((el) =>
+          lineFor.get(el.getAttribute("data-aqb-id") ?? ""),
         )
         pending += ` ${[lineFor.get(id), ...nested].join(" ")} `
         continue

@@ -13,7 +13,7 @@ const lastTag = (
     .text()
 ).trim()
 const published = (
-  await $`npm view clef-browser version`.nothrow().quiet().text()
+  await $`npm view agent-quick-browse version`.nothrow().quiet().text()
 ).trim()
 
 const messages = (

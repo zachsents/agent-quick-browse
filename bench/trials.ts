@@ -48,11 +48,11 @@ export const TRIALS: Trial[] = [
   {
     level: 3,
     name: "4-hop navigation",
-    goal: "Open the src/agent.ts file in the zachsents/clef-browser repository",
+    goal: "Open the src/agent.ts file in the zachsents/agent-quick-browse repository",
     url: "https://github.com/zachsents",
     maxSteps: 8,
     check: ({ url }) =>
-      url.endsWith("/zachsents/clef-browser/blob/main/src/agent.ts"),
+      url.endsWith("/zachsents/agent-quick-browse/blob/main/src/agent.ts"),
   },
   {
     level: 4,
@@ -86,10 +86,10 @@ export const TRIALS: Trial[] = [
   {
     level: 6,
     name: "3-part goal",
-    goal: "Open the zachsents/clef-browser repository, go to its list of commits, and open the most recent commit",
+    goal: "Open the zachsents/agent-quick-browse repository, go to its list of commits, and open the most recent commit",
     url: "https://github.com/zachsents",
     maxSteps: 12,
-    check: ({ url }) => url.includes("/zachsents/clef-browser/commit/"),
+    check: ({ url }) => url.includes("/zachsents/agent-quick-browse/commit/"),
   },
   {
     level: 7,
@@ -102,11 +102,11 @@ export const TRIALS: Trial[] = [
   {
     level: 8,
     name: "5-part goal",
-    goal: "In the zachsents/clef-browser repository, open the extension folder, open manifest.json, then go back to the repository's main page and open README.md",
-    url: "https://github.com/zachsents/clef-browser",
+    goal: "In the zachsents/agent-quick-browse repository, open the extension folder, open manifest.json, then go back to the repository's main page and open README.md",
+    url: "https://github.com/zachsents/agent-quick-browse",
     maxSteps: 14,
     check: ({ url }) =>
-      url.endsWith("/zachsents/clef-browser/blob/main/README.md"),
+      url.endsWith("/zachsents/agent-quick-browse/blob/main/README.md"),
   },
   {
     level: 9,
@@ -193,11 +193,11 @@ export const TRIALS: Trial[] = [
   {
     level: 14,
     name: "7-part goal",
-    goal: "In the zachsents/clef-browser repository: open the scripts folder, open next-version.ts, go back to the repository main page, open the extension folder, open background.js, go back to the repository main page, then open package.json",
-    url: "https://github.com/zachsents/clef-browser",
+    goal: "In the zachsents/agent-quick-browse repository: open the scripts folder, open next-version.ts, go back to the repository main page, open the extension folder, open background.js, go back to the repository main page, then open package.json",
+    url: "https://github.com/zachsents/agent-quick-browse",
     maxSteps: 18,
     check: ({ url }) =>
-      url.endsWith("/zachsents/clef-browser/blob/main/package.json"),
+      url.endsWith("/zachsents/agent-quick-browse/blob/main/package.json"),
   },
   {
     level: 15,
@@ -210,11 +210,11 @@ export const TRIALS: Trial[] = [
   {
     level: 16,
     name: "10-part goal",
-    goal: "In the zachsents/clef-browser repository: open the src folder, open agent.ts, go back to the src folder, open tab.ts, go back to the repository main page, open the extension folder, open manifest.json, go back to the extension folder, open background.js, then go back to the repository main page and open README.md",
-    url: "https://github.com/zachsents/clef-browser",
+    goal: "In the zachsents/agent-quick-browse repository: open the src folder, open agent.ts, go back to the src folder, open tab.ts, go back to the repository main page, open the extension folder, open manifest.json, go back to the extension folder, open background.js, then go back to the repository main page and open README.md",
+    url: "https://github.com/zachsents/agent-quick-browse",
     maxSteps: 24,
     check: ({ url }) =>
-      url.endsWith("/zachsents/clef-browser/blob/main/README.md"),
+      url.endsWith("/zachsents/agent-quick-browse/blob/main/README.md"),
   },
   {
     level: 17,

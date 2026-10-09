@@ -61,7 +61,7 @@ const INTERACTIVE_SELECTOR = [
 ].join(",")
 
 /**
- * Tags interactive elements with `data-clef-id` and describes the page for the
+ * Tags interactive elements with `data-aqb-id` and describes the page for the
  * decision model. Vision mode tags only what's in the viewport and returns a
  * screenshot with numbered boxes drawn on it. Text mode tags elements across
  * the whole page (marking off-screen ones) and returns a structured text
@@ -83,7 +83,7 @@ export async function snapshotPage(mode: SnapshotMode) {
     return { elements, outline: outline ?? "", screenshot: null }
 
   const screenshot = await tab.screenshot()
-  await tab.evaluate(() => document.getElementById("__clef_overlay")?.remove())
+  await tab.evaluate(() => document.getElementById("__aqb_overlay")?.remove())
   return { elements, outline: null, screenshot }
 }
 

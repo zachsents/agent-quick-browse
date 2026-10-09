@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "clef-browser",
+      "name": "agent-quick-browse",
       "dependencies": {
         "@modelcontextprotocol/sdk": "^1.32.1",
         "remeda": "^2.51.0",

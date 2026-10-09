@@ -1,11 +1,11 @@
-// Relays commands from the clef-browser native host to agent tabs via chrome.debugger (CDP).
+// Relays commands from the agent-quick-browse native host to agent tabs via chrome.debugger (CDP).
 // Each named session controls one tab (created in the background, or an existing tab it took over), grouped under a
 // tab group the agent chooses, so any number of agents can run in parallel. Sessions are released when done: agent
 // tabs close, taken-over tabs are handed back (debugger detached, original group restored).
 // The native port also keeps this service worker alive while Chrome is running.
 
-const HOST = "com.clef_browser.host"
-const DEFAULT_GROUP = "Clef"
+const HOST = "com.agent_quick_browse.host"
+const DEFAULT_GROUP = "AQB"
 const NO_GROUP = chrome.tabGroups.TAB_GROUP_ID_NONE
 let port = null
 
@@ -201,7 +201,7 @@ function tabEdit(edit) {
   return tabEdits
 }
 
-/** Stable color per group title ("Clef" is pink). */
+/** Stable color per group title ("AQB" is pink). */
 function groupColor(title) {
   if (title === DEFAULT_GROUP) return "pink"
   const colors = [
@@ -266,7 +266,7 @@ function ungroupTab(tabId, originalGroupId) {
 /**
  * Shows where the agent's pointer is: a small glowing violet→cyan orb with a
  * soft halo that ripples on clicks. It is driven only by the agent
- * (window.__clefOrb.glide / .click, called from the CLI alongside its mouse
+ * (window.__aqbOrb.glide / .click, called from the CLI alongside its mouse
  * events), never by mouse events, so your own mouse on the page doesn't make it
  * appear. Each glide is one smooth Web Animation, and the orb fades out 2.5s
  * after the agent's last move. Built only with DOM APIs (no innerHTML
@@ -274,7 +274,7 @@ function ungroupTab(tabId, originalGroupId) {
  * ignores pointer events so it never blocks clicks.
  */
 const CURSOR_SCRIPT = `(() => {
-  if (window.__clefOrb) return
+  if (window.__aqbOrb) return
   const orb = document.createElement("div")
   orb.style.cssText =
     "position:fixed;left:0;top:0;width:14px;height:14px;margin:-7px 0 0 -7px;border-radius:50%;pointer-events:none;" +
@@ -290,7 +290,7 @@ const CURSOR_SCRIPT = `(() => {
     clearTimeout(hideTimer)
     hideTimer = setTimeout(() => (orb.style.opacity = "0"), 2500)
   }
-  window.__clefOrb = {
+  window.__aqbOrb = {
     glide(from, to, duration) {
       show()
       at = to

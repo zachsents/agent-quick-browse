@@ -11,21 +11,21 @@ import { EXTENSION_ID, HOST_NAME, STATE_DIR } from "./paths.ts"
 import { describeElement, snapshotPage } from "./snapshot.ts"
 import * as tab from "./tab.ts"
 
-const USAGE = `clef-browser — drive your own Chrome with a decision model (Jev, GPT-6 Luna Decisions, or Clef)
+const USAGE = `aqb (agent-quick-browse) — drive your own Chrome with a decision model (Jev, GPT-6 Luna Decisions, or Clef)
 
 Usage:
-  clef-browser run "<goal>" [--url <url>] [--fact key=value ...] [--file name=path ...] [--model jev|luna|clef|clef-flash] [--text|--vision] [--max-steps 25]
-  clef-browser look [--url <url>] [--text]  Print numbered elements + annotated screenshot (or the text outline)
-  clef-browser tabs                   List open Chrome tabs (id, group, controlling session)
-  clef-browser attach <tabId>         Take over an already-open tab for the session
-  clef-browser release [--keep]       End the session: close its tabs (--keep: hand them back ungrouped);
+  aqb run "<goal>" [--url <url>] [--fact key=value ...] [--file name=path ...] [--model jev|luna|clef|clef-flash] [--text|--vision] [--max-steps 25]
+  aqb look [--url <url>] [--text]  Print numbered elements + annotated screenshot (or the text outline)
+  aqb tabs                   List open Chrome tabs (id, group, controlling session)
+  aqb attach <tabId>         Take over an already-open tab for the session
+  aqb release [--keep]       End the session: close its tabs (--keep: hand them back ungrouped);
                                       a tab taken over with attach is always handed back
-  clef-browser close                  Same as release without --keep
-  clef-browser mcp                    Run as a stdio MCP server
-  clef-browser setup                  Register the native host and print extension install steps
-  All commands take --session <name> (default "default") and --group <name> (tab group, default "Clef").
+  aqb close                  Same as release without --keep
+  aqb mcp                    Run as a stdio MCP server
+  aqb setup                  Register the native host and print extension install steps
+  All commands take --session <name> (default "default") and --group <name> (tab group, default "AQB").
 
-Each session works in its own background tab (grouped as "Clef") in your normal Chrome, with your logins, so
+Each session works in its own background tab (grouped as "AQB") in your normal Chrome, with your logins, so
 sessions can run in parallel. Successive commands in a session continue in its tab; omit --url to pick up there.
 Text to type must be passed with --fact, and files to upload with --file; the model picks which one fits each field.
 --model defaults to the best model your keys allow (Jev, else GPT-6 Luna, else Clef). --text / --vision choose how the
@@ -84,7 +84,7 @@ switch (command) {
   case "attach": {
     const tabId = Number(rest[0])
     if (!Number.isInteger(tabId))
-      throw new Error("attach needs a tab id (see `clef-browser tabs`)")
+      throw new Error("attach needs a tab id (see `aqb tabs`)")
     const { title, url } = await inSession(() => tab.adopt(tabId))
     console.log(`Session "${values.session}" now controls: ${title} — ${url}`)
     break
@@ -98,9 +98,9 @@ switch (command) {
 }
 
 /**
- * Installs the native host and extension into ~/.clef-browser (stable paths,
- * even when run from bunx's temporary cache) and registers the host with
- * Chrome. Re-run after upgrading.
+ * Installs the native host and extension into ~/.aqb (stable paths, even when
+ * run from bunx's temporary cache) and registers the host with Chrome. Re-run
+ * after upgrading.
  */
 async function setup() {
   const projectRoot = resolve(import.meta.dir, "..")
@@ -126,17 +126,20 @@ async function setup() {
   rmSync(extensionDir, { recursive: true, force: true })
   cpSync(join(projectRoot, "extension"), extensionDir, { recursive: true })
 
-  const manifestPath = join(
+  const hostsDir = join(
     homedir(),
     "Library/Application Support/Google/Chrome/NativeMessagingHosts",
-    `${HOST_NAME}.json`,
   )
+  const manifestPath = join(hostsDir, `${HOST_NAME}.json`)
+  // This project used to be called clef-browser; drop its native host so the old extension stops launching it
+  const migrated = existsSync(join(hostsDir, "com.clef_browser.host.json"))
+  rmSync(join(hostsDir, "com.clef_browser.host.json"), { force: true })
   await Bun.write(
     manifestPath,
     JSON.stringify(
       {
         name: HOST_NAME,
-        description: "clef-browser native host",
+        description: "agent-quick-browse native host",
         path: launcher,
         type: "stdio",
         allowed_origins: [`chrome-extension://${EXTENSION_ID}/`],
@@ -147,13 +150,13 @@ async function setup() {
   )
   console.log(`Installed the native host and extension in ${STATE_DIR}
 
-If you haven't already, load the extension once:
+${migrated ? `Upgrading from clef-browser: in chrome://extensions, remove "Clef Browser Bridge" and load the new folder below.\n\n` : ""}If you haven't already, load the extension once:
   1. Open chrome://extensions and turn on Developer mode
   2. Load unpacked → ${extensionDir}
   3. Check it shows ID ${EXTENSION_ID}
 After upgrading, re-run setup and click the extension's reload button.
 
-Then try: clef-browser run "Open the Ask HN page" --url https://news.ycombinator.com`)
+Then try: aqb run "Open the Ask HN page" --url https://news.ycombinator.com`)
 }
 
 async function look() {
@@ -165,7 +168,7 @@ async function look() {
     console.log(`${title} — ${url}\n${outline}`)
     return
   }
-  const file = join(tmpdir(), `clef-look-${Date.now()}.jpg`)
+  const file = join(tmpdir(), `aqb-look-${Date.now()}.jpg`)
   await Bun.write(file, Buffer.from(screenshot.split(",")[1] ?? "", "base64"))
   console.log(
     `${title} — ${url}\n${elements.map(describeElement).join("\n")}\n\nscreenshot: ${file}`,
@@ -176,7 +179,7 @@ async function run() {
   const goal = rest.join(" ")
   if (!goal)
     throw new Error(
-      'run needs a goal, e.g. clef-browser run "find the weather in Austin"',
+      'run needs a goal, e.g. aqb run "find the weather in Austin"',
     )
   const model = z
     .enum(["clef", "clef-flash", "jev", "luna"])

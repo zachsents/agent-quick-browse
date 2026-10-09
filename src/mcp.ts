@@ -14,14 +14,14 @@ import * as tab from "./tab.ts"
  */
 export async function startMcp() {
   const server = new McpServer(
-    { name: "clef-browser", version: "0.2.0" },
+    { name: "aqb", version: "0.5.0" },
     {
       // Shown to the agent alongside every tool (Claude Code puts it in the system prompt): the cross-tool policy
-      instructions: `clef-browser drives the user's real, logged-in Chrome with a fast decision model, in background tabs that don't disturb the user.
+      instructions: `AQB (agent-quick-browse) drives the user's real, logged-in Chrome with a fast decision model, in background tabs that don't disturb the user.
 
 Prefer browser_run for routine web tasks (navigating, searching, following links, filling and submitting forms, multi-step clicking) over screenshot-driven browser control: it is 2–7x faster in benchmarks and already has the user's logins.
 
-Give browser_run one objective on one site with explicit steps, put any text to type in facts, and check status and url before the next step. Read results with browser_page_text or browser_look; finish stuck steps with browser_click / browser_type. Use another browser tool for visual judgment, dragging or drawing, or when clef-browser is blocked.
+Give browser_run one objective on one site with explicit steps, put any text to type in facts, and check status and url before the next step. Read results with browser_page_text or browser_look; finish stuck steps with browser_click / browser_type. Use another browser tool for visual judgment, dragging or drawing, or when AQB is blocked.
 
 Tabs: each session controls one tab, in a tab group you can name with \`group\` (sessions with the same group share it). To work in a tab the user already has open, find it with browser_tabs and take it over with browser_attach. When a session's work is done, call browser_release: tabs you opened close (or pass keep_open to leave them for the user), and a taken-over tab is handed back out of your group. Don't leave tabs behind in groups.
 
@@ -40,7 +40,7 @@ Ask the user before anything that purchases, sends, posts, deletes, or submits.`
       .string()
       .optional()
       .describe(
-        'Tab group for the session\'s tab (default "Clef"). Sessions with the same group share it; changing it moves the tab.',
+        'Tab group for the session\'s tab (default "AQB"). Sessions with the same group share it; changing it moves the tab.',
       ),
   }
   /**

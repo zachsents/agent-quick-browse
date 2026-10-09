@@ -1,6 +1,6 @@
-# clef-browser
+# Agent Quick Browse (AQB)
 
-[![npm](https://img.shields.io/npm/v/clef-browser)](https://www.npmjs.com/package/clef-browser)
+[![npm](https://img.shields.io/npm/v/agent-quick-browse)](https://www.npmjs.com/package/agent-quick-browse)
 
 **Agents finish multi-step browser tasks in 51–77% less time (2–4× faster) than with screenshot-driven browser control.**
 
@@ -15,16 +15,16 @@ Fast, cheap browser actions for agents. A decision model — TypeSafe's Jev, Ope
 
 ## Benchmarks
 
-### Agent tasks: Sonnet + clef-browser vs Sonnet + Claude in Chrome
+### Agent tasks: Sonnet + AQB vs Sonnet + Claude in Chrome
 
 Each task needs ~3 sub-goals. Same model (Sonnet), same prompt; one side drives `browser_run` (Jev) and finishes stuck steps itself, the other uses Claude in Chrome. Average of 2 runs each; all 16 runs answered correctly.
 
-| Task                                                       | clef-browser | Claude in Chrome | Time saved |
-| ---------------------------------------------------------- | ------------ | ---------------- | ---------- |
-| GitHub: latest commit → file at that commit → read a value | **28.2s**    | 57.3s            | 51%        |
-| Wikipedia fact → fill + submit a form on another site      | **24.9s**    | 55.8s            | 55%        |
-| GitHub releases → latest release → tag + date              | **17.5s**    | 74.7s            | 77%        |
-| Google Flights: one-way search → cheapest nonstop          | **41.1s**    | 104.6s           | 61%        |
+| Task                                                       | AQB       | Claude in Chrome | Time saved |
+| ---------------------------------------------------------- | --------- | ---------------- | ---------- |
+| GitHub: latest commit → file at that commit → read a value | **28.2s** | 57.3s            | 51%        |
+| Wikipedia fact → fill + submit a form on another site      | **24.9s** | 55.8s            | 55%        |
+| GitHub releases → latest release → tag + date              | **17.5s** | 74.7s            | 77%        |
+| Google Flights: one-way search → cheapest nonstop          | **41.1s** | 104.6s           | 61%        |
 
 The agent also used about half as many tool calls (10.6 vs 19.5 per task).
 
@@ -51,41 +51,43 @@ Sonnet times exclude ~15s of agent startup. Also passing in single-run ceiling t
 
 ## Setup
 
-Requires macOS, Google Chrome, [Bun](https://bun.sh), and an API key for a decision model: a [Vercel AI Gateway](https://vercel.com/ai-gateway) key (covers Jev and GPT-6 Luna), or a TypeSafe key (Jev) or OpenAI key (GPT-6 Luna) directly. Published on npm as [`clef-browser`](https://www.npmjs.com/package/clef-browser). Paste this to your coding agent (Claude Code, Codex, Cursor, …):
+Requires macOS, Google Chrome, [Bun](https://bun.sh), and an API key for a decision model: a [Vercel AI Gateway](https://vercel.com/ai-gateway) key (covers Jev and GPT-6 Luna), or a TypeSafe key (Jev) or OpenAI key (GPT-6 Luna) directly. Published on npm as [`agent-quick-browse`](https://www.npmjs.com/package/agent-quick-browse). Paste this to your coding agent (Claude Code, Codex, Cursor, …):
 
 ```text
-Set up the clef-browser MCP server (https://github.com/zachsents/clef-browser) for me:
+Set up the Agent Quick Browse (AQB) MCP server (https://github.com/zachsents/agent-quick-browse) for me:
 
-1. Run: bunx clef-browser@latest setup
+1. Run: bunx agent-quick-browse@latest setup
 2. Tell me to open chrome://extensions, turn on Developer mode, click "Load unpacked" and pick
-   ~/.clef-browser/extension. Wait until I confirm.
+   ~/.aqb/extension. Wait until I confirm.
 3. Check that one of these is exported in ~/.zprofile (login shells read that, not ~/.zshrc):
    AI_GATEWAY_API_KEY (Vercel AI Gateway, covers Jev + GPT-6 Luna), TYPESAFE_API_KEY (Jev), or
    OPENAI_API_KEY (GPT-6 Luna — then use --model luna / model "luna"). If none is, ask me to add one
    myself — never ask me to paste a key into chat.
 4. Register the MCP server, launched through a login shell so it picks up that key. For Claude Code:
-   claude mcp add -s user clef-browser -- zsh -lc "exec ~/.bun/bin/bun x clef-browser@latest mcp"
+   claude mcp add -s user aqb -- zsh -lc "exec ~/.bun/bin/bun x agent-quick-browse@latest mcp"
    For other agents, add an MCP server with command `zsh` and
-   args ["-lc", "exec ~/.bun/bin/bun x clef-browser@latest mcp"].
-5. Verify: bunx clef-browser run "Open the Ask HN page" --url https://news.ycombinator.com
+   args ["-lc", "exec ~/.bun/bin/bun x agent-quick-browse@latest mcp"].
+5. Verify: bunx agent-quick-browse run "Open the Ask HN page" --url https://news.ycombinator.com
    It should print JSON with "status":"done" and a url ending in /ask.
 6. Ask me whether to add this line to my global agent instructions (~/.claude/CLAUDE.md for
    Claude Code, ~/.codex/AGENTS.md or similar for other agents), and only add it if I say yes:
-   "For routine web tasks (navigating, searching, filling forms), prefer the clef-browser MCP's
-   browser_run over other browser tools; use those for visual work or when clef-browser is blocked."
+   "For routine web tasks (navigating, searching, filling forms), prefer the aqb MCP's
+   browser_run over other browser tools; use those for visual work or when aqb is blocked."
 7. Tell me to restart my agent session so the browser_* tools load.
 ```
 
-Keys: `AI_GATEWAY_API_KEY` is used when set; otherwise `TYPESAFE_API_KEY` (Jev, default model) and `OPENAI_API_KEY` (`--model luna`) talk to the providers directly. Clef needs `CLOUDFLARE_AI_ACCOUNT_ID` + `CLOUDFLARE_AI_API_TOKEN` (a Workers AI token). After upgrading, re-run `bunx clef-browser@latest setup` and reload the extension.
+Keys: `AI_GATEWAY_API_KEY` is used when set; otherwise `TYPESAFE_API_KEY` (Jev, default model) and `OPENAI_API_KEY` (`--model luna`) talk to the providers directly. Clef needs `CLOUDFLARE_AI_ACCOUNT_ID` + `CLOUDFLARE_AI_API_TOKEN` (a Workers AI token). After upgrading, re-run `bunx agent-quick-browse@latest setup` and reload the extension.
 
 ## Usage
 
 ```sh
-bunx clef-browser run "search for Cloudflare and open its article" --url https://en.wikipedia.org --fact search=Cloudflare
-bunx clef-browser run "upload my resume" --url https://example.com/apply --file resume=/path/to/resume.pdf
-bunx clef-browser run "open my orders" --url https://amazon.com --model luna   # GPT-6 Luna Decisions (add --vision for screenshots)
-bunx clef-browser look --text     # what the model sees
-bunx clef-browser mcp             # MCP server: browser_run, browser_look, browser_click, browser_type, browser_hover, browser_upload, browser_tabs, browser_attach, browser_release, …
+bunx agent-quick-browse run "search for Cloudflare and open its article" --url https://en.wikipedia.org --fact search=Cloudflare
+bunx agent-quick-browse run "upload my resume" --url https://example.com/apply --file resume=/path/to/resume.pdf
+bunx agent-quick-browse run "open my orders" --url https://amazon.com --model luna   # GPT-6 Luna Decisions (add --vision for screenshots)
+bunx agent-quick-browse look --text     # what the model sees
+bunx agent-quick-browse mcp       # MCP server: browser_run, browser_look, browser_click, browser_type, browser_hover, browser_upload, browser_tabs, browser_attach, browser_release, …
 ```
+
+For the short `aqb` command, install globally: `bun add -g agent-quick-browse`.
 
 Each `--session` (or MCP session) gets its own background tab, in a tab group you name with `--group` (default "Clef"); omit `--url` to continue where it left off. Take over a tab you already have open with `tabs` + `attach <tabId>`. `release` ends a session: tabs it opened close (`--keep` leaves them open, ungrouped), and taken-over tabs are handed back to their original group. MCP servers release their sessions automatically when the agent disconnects.

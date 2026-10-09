@@ -1,6 +1,6 @@
 {
-  "name": "clef-browser",
-  "version": "0.1.0",
+  "name": "agent-quick-browse",
+  "version": "0.5.0",
   "description": "Fast, cheap browser actions for agents: a decision model (Jev or Clef) drives your real, logged-in Chrome. CLI + MCP server.",
   "keywords": [
     "browser-automation",
@@ -15,12 +15,13 @@
   "author": "Zach Sents",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/zachsents/clef-browser.git"
+    "url": "git+https://github.com/zachsents/agent-quick-browse.git"
   },
-  "homepage": "https://github.com/zachsents/clef-browser#readme",
+  "homepage": "https://github.com/zachsents/agent-quick-browse#readme",
   "type": "module",
   "bin": {
-    "clef-browser": "src/index.ts"
+    "agent-quick-browse": "src/index.ts",
+    "aqb": "src/index.ts"
   },
   "files": [
     "src",

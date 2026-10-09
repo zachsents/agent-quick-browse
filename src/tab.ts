@@ -15,7 +15,7 @@ function currentSession() {
 /**
  * Runs `fn` against the named session's tab. Each session has its own tab, so
  * sessions can run in parallel. `group` names the tab group the session's tab
- * goes in (default "Clef"); sessions with the same group share it.
+ * goes in (default "AQB"); sessions with the same group share it.
  */
 export function withSession<T>(
   session: string,
@@ -104,7 +104,7 @@ async function rpc(
     }),
   }).catch(() => {
     throw new Error(
-      "Can't reach the Clef Browser Bridge. Is Chrome running with the extension loaded? (run `clef-browser setup`)",
+      "Can't reach the Agent Quick Browse Bridge. Is Chrome running with the extension loaded? (run `aqb setup`)",
     )
   })
   const { result, error } = rpcResponseSchema.parse(await res.json())
@@ -248,9 +248,9 @@ const scrollMovesSchema = z.array(
  */
 async function elementCenter(id: string) {
   const moves = scrollMovesSchema.parse(
-    await evaluate((clefId) => {
-      const el = document.querySelector(`[data-clef-id="${clefId}"]`)
-      if (!el) throw new Error(`element ${clefId} is gone`)
+    await evaluate((targetId) => {
+      const el = document.querySelector(`[data-aqb-id="${targetId}"]`)
+      if (!el) throw new Error(`element ${targetId} is gone`)
       const r = el.getBoundingClientRect()
       if (
         r.top >= 0 &&
@@ -275,7 +275,7 @@ async function elementCenter(id: string) {
         const to = [s.scrollLeft, s.scrollTop]
         s.scrollLeft = left
         s.scrollTop = top
-        s.setAttribute("data-clef-scroll", String(i))
+        s.setAttribute("data-aqb-scroll", String(i))
         return [{ id: String(i), from: [left, top], to }]
       })
     }, id),
@@ -283,9 +283,9 @@ async function elementCenter(id: string) {
   if (moves.length) await animateScroll(moves)
 
   return rectSchema.parse(
-    await evaluate((clefId) => {
-      const el = document.querySelector(`[data-clef-id="${clefId}"]`)
-      if (!el) throw new Error(`element ${clefId} is gone`)
+    await evaluate((targetId) => {
+      const el = document.querySelector(`[data-aqb-id="${targetId}"]`)
+      if (!el) throw new Error(`element ${targetId} is gone`)
       const centers = [...el.getClientRects(), el.getBoundingClientRect()]
         .filter((r) => r.width > 0 && r.height > 0)
         .map((r) => ({ x: r.left + r.width / 2, y: r.top + r.height / 2 }))
@@ -322,11 +322,11 @@ function applyScroll({
   isLast: boolean
 }) {
   for (const { id, from, to } of moves) {
-    const el = document.querySelector(`[data-clef-scroll="${id}"]`)
+    const el = document.querySelector(`[data-aqb-scroll="${id}"]`)
     if (!el) continue
     el.scrollLeft = from[0] + (to[0] - from[0]) * eased
     el.scrollTop = from[1] + (to[1] - from[1]) * eased
-    if (isLast) el.removeAttribute("data-clef-scroll")
+    if (isLast) el.removeAttribute("data-aqb-scroll")
   }
 }
 
@@ -360,12 +360,12 @@ async function movePointer(x: number, y: number) {
 }
 
 /**
- * Animates the visible pointer orb the extension injects (`window.__clefOrb`).
+ * Animates the visible pointer orb the extension injects (`window.__aqbOrb`).
  * It's driven explicitly rather than by mouse events so the user's own mouse
  * never makes it appear. A no-op on pages without it.
  */
 async function showOrb(call: string) {
-  await cdp("Runtime.evaluate", { expression: `window.__clefOrb?.${call}` })
+  await cdp("Runtime.evaluate", { expression: `window.__aqbOrb?.${call}` })
 }
 
 /** Ease-in-out curve for animations, t in [0, 1]. */
@@ -468,9 +468,9 @@ export async function upload(id: string, paths: string[]) {
  * Runs in the page: finds the `<input type=file>` a numbered element stands for
  * (often hidden behind a button).
  */
-function findFileInput(clefId: string) {
-  const el = document.querySelector(`[data-clef-id="${clefId}"]`)
-  if (!el) throw new Error(`element ${clefId} is gone`)
+function findFileInput(targetId: string) {
+  const el = document.querySelector(`[data-aqb-id="${targetId}"]`)
+  if (!el) throw new Error(`element ${targetId} is gone`)
   if (el.matches("input[type=file]")) return el
   if (el instanceof HTMLLabelElement && el.control?.matches("input[type=file]"))
     return el.control
@@ -488,10 +488,10 @@ function findFileInput(clefId: string) {
 
 export async function selectOption(id: string, label: string) {
   await evaluate(
-    ({ clefId, label }) => {
-      const select = document.querySelector(`[data-clef-id="${clefId}"]`)
+    ({ targetId, label }) => {
+      const select = document.querySelector(`[data-aqb-id="${targetId}"]`)
       if (!(select instanceof HTMLSelectElement))
-        throw new Error(`element ${clefId} is not a <select>`)
+        throw new Error(`element ${targetId} is not a <select>`)
       const option = [...select.options].find(
         (o) => o.textContent.trim() === label,
       )
@@ -500,7 +500,7 @@ export async function selectOption(id: string, label: string) {
       select.dispatchEvent(new Event("input", { bubbles: true }))
       select.dispatchEvent(new Event("change", { bubbles: true }))
     },
-    { clefId: id, label },
+    { targetId: id, label },
   )
 }
 
@@ -509,8 +509,8 @@ export async function selectOptions(id: string) {
     .array(z.string())
     .parse(
       await evaluate(
-        (clefId) =>
-          [...document.querySelectorAll(`[data-clef-id="${clefId}"] option`)]
+        (targetId) =>
+          [...document.querySelectorAll(`[data-aqb-id="${targetId}"] option`)]
             .map((o) => o.textContent.trim())
             .filter(Boolean),
         id,
