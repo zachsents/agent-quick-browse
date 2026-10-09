@@ -49,7 +49,7 @@ Sonnet times exclude ~15s of agent startup. Also passing in single-run ceiling t
 
 - **One call:** one objective on one site with explicit steps — "search for X and open the result", "fill the form with these facts and submit", up to ~10 navigation steps, "open the story with the most points".
 - **Split up or do yourself:** complex app widgets (date pickers, Google Flights — models declare `done` before the final submit), vague or judgment-heavy goals, anything needing writing.
-- Pass every string to type (including dates) as `facts`, and files to upload as `files`. Check each result (`status`, `reason`, `url`, `actions`) before the next call.
+- Pass every string to type (including dates) as `facts`, and files to upload as `files`. If a rich-text editor mangles typed text (hashtag/mention pickers), pass `keystrokes` (`--keystrokes`) to type it key by key. Check each result (`status`, `reason`, `url`, `actions`) before the next call.
 
 ## Setup
 
@@ -78,7 +78,7 @@ Set up the Agent Quick Browse (AQB) MCP server (https://github.com/zachsents/age
 7. Tell me to restart my agent session so the browser_* tools load.
 ```
 
-Keys: `AI_GATEWAY_API_KEY` is used when set; otherwise `TYPESAFE_API_KEY` (Jev, default model) and `OPENAI_API_KEY` (`--model luna`) talk to the providers directly. Clef needs `CLOUDFLARE_AI_ACCOUNT_ID` + `CLOUDFLARE_AI_API_TOKEN` (a Workers AI token). After upgrading, re-run `bunx agent-quick-browse@latest setup` and reload the extension.
+Keys are read from the environment or from `~/.aqb/env` (`aqb setup --save-keys` copies them there, so agents and non-login shells find them). `AI_GATEWAY_API_KEY` is used when set; otherwise `TYPESAFE_API_KEY` (Jev, default model) and `OPENAI_API_KEY` (`--model luna`) talk to the providers directly. Clef needs `CLOUDFLARE_AI_ACCOUNT_ID` + `CLOUDFLARE_AI_API_TOKEN` (a Workers AI token). After upgrading, re-run `bunx agent-quick-browse@latest setup` and reload the extension.
 
 ## Usage
 

@@ -1,0 +1,98 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Widget test</title>
+<style>
+  body {
+    font: 16px system-ui;
+    margin: 24px;
+  }
+  .picker {
+    display: inline-flex;
+    gap: 12px;
+    border: 1px solid #ccc;
+    padding: 8px;
+  }
+  .picker ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    max-height: 120px;
+    overflow: auto;
+  }
+  .picker li {
+    cursor: pointer;
+    padding: 2px 8px;
+  }
+  .switch {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+  }
+  .switch input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+  }
+  .track {
+    width: 36px;
+    height: 20px;
+    border-radius: 10px;
+    background: #ccc;
+  }
+  .switch input:checked + .track {
+    background: #22c55e;
+  }
+</style>
+<h1>Schedule post</h1>
+<p>Status: <b id="status">editing</b></p>
+<!-- Mimics TikTok's scheduler: the time box is read-only and set by clicking the hour/minute lists -->
+<p>
+  Time:
+  <input id="time" readonly value="12:35" />
+</p>
+<div class="picker">
+  <ul id="hours"></ul>
+  <ul id="minutes"></ul>
+</div>
+<p>
+  <label class="switch">
+    <input type="checkbox" id="ai" />
+    <span class="track"></span>
+    AI-generated content
+  </label>
+</p>
+<p>
+  <label>Video <input type="file" id="video" /></label>
+  <b id="video-status">none</b>
+</p>
+<!-- Clicking Retry wipes the form, like TikTok's error state -->
+<button id="retry" type="button">Retry</button>
+<script>
+  const time = document.getElementById("time")
+  const pad = (n) => String(n).padStart(2, "0")
+  const [hh, mm] = time.value.split(":")
+  const fill = (list, count, index) => {
+    for (let i = 0; i < count; i++) {
+      const li = Object.assign(document.createElement("li"), {
+        textContent: pad(i),
+      })
+      li.onclick = () => {
+        const parts = time.value.split(":")
+        parts[index] = pad(i)
+        time.value = parts.join(":")
+      }
+      document.getElementById(list).append(li)
+    }
+  }
+  fill("hours", 24, 0)
+  fill("minutes", 60, 1)
+  document.getElementById("video").addEventListener("change", (e) => {
+    document.getElementById("video-status").textContent =
+      `${e.target.files[0]?.name} (change #${(window.changes = (window.changes ?? 0) + 1)})`
+  })
+  document.getElementById("retry").onclick = () => {
+    document.getElementById("status").textContent = "RESET by Retry"
+    time.value = "00:00"
+  }
+</script>

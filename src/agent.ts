@@ -33,6 +33,11 @@ type Context = {
   facts: Record<string, string>
   /** Local files the model may upload, by name → absolute path */
   files: Record<string, string>
+  /**
+   * Type text with per-character key events instead of inserting it in one go
+   * (for picky rich-text editors)
+   */
+  keystrokes?: boolean
   model: DecisionModel
   /** Jev is text-only, so it always uses "text" */
   mode: SnapshotMode
@@ -67,7 +72,12 @@ export async function runAgent({
         goal,
         ...(!R.isEmpty(facts) && { facts }),
         ...(!R.isEmpty(files) && {
-          files_available_to_upload: Object.keys(files),
+          uploads: R.isEmpty(filesLeft(files, history))
+            ? `All provided files are attached (${attachedSoFar(history).join(", ")}); no uploads left to do`
+            : {
+                files_to_upload: Object.keys(filesLeft(files, history)),
+                already_attached: attachedSoFar(history),
+              },
         }),
         url,
         title,
@@ -121,14 +131,11 @@ export async function runAgent({
       const actionMs = Math.round(performance.now() - actionStarted)
       if (actionMs > 1000) log(`  (action took ${actionMs}ms)`)
       history.push(typeof note === "string" ? `${summary} -> ${note}` : summary)
-      if (
-        history.length >= 3 &&
-        history.slice(-3).every((entry) => entry === summary)
-      )
+      if (isLooping(history, summary))
         return finish(
           "blocked",
           history,
-          `Repeated "${summary}" 3 times without progress`,
+          `Repeated "${summary}" without progress`,
         )
     } catch (error) {
       if (error instanceof NeedsInputError)
@@ -138,6 +145,12 @@ export async function runAgent({
         error instanceof Error ? error.message.split("\n")[0] : String(error)
       log(`  ! ${message}`)
       history.push(`${summary} -> FAILED: ${message}`)
+      if (isLooping(history, summary))
+        return finish(
+          "blocked",
+          history,
+          `Repeated "${summary}" without progress (last error: ${message})`,
+        )
     }
     const settleStarted = performance.now()
     await tab.waitForLoad()
@@ -182,6 +195,39 @@ async function snapshotWithRetry(mode: SnapshotMode) {
   }
 }
 
+/**
+ * True when the same action (ignoring its result note) shows up 3 times in the
+ * last 6 steps. Catches both straight repeats and back-and-forth loops like
+ * "type into box, click elsewhere, type into box, …".
+ */
+function isLooping(history: string[], summary: string) {
+  return (
+    history.slice(-6).filter((entry) => entry.split(" -> ")[0] === summary)
+      .length >= 3
+  )
+}
+
+/**
+ * File names this run has attached so far, from the upload notes in its
+ * history.
+ */
+function attachedSoFar(history: string[]) {
+  return R.unique(
+    history.flatMap(
+      (entry) => /-> (?:already )?attached (.+)$/.exec(entry)?.[1] ?? [],
+    ),
+  )
+}
+
+/** The caller's files that this run hasn't attached yet. */
+function filesLeft(files: Record<string, string>, history: string[]) {
+  const attached = attachedSoFar(history)
+  return R.pickBy(
+    files,
+    (path) => !attached.includes(path.split("/").at(-1) ?? path),
+  )
+}
+
 function isAction(choice: string): choice is Action {
   return choice in ACTIONS
 }
@@ -212,15 +258,27 @@ async function perform(
       return uploadFile(target, ctx)
     case "type": {
       if (!target) throw new Error("no element to type into")
-      if (!target.editable && target.tag !== "select") {
-        ctx.log("  (not a text field; clicking instead)")
+      if (
+        !target.editable &&
+        target.tag !== "select" &&
+        target.role !== "file upload"
+      ) {
+        // Dropdown-style widgets (e.g. a div combobox) are opened by clicking; clicking anything else on "type" is
+        // how a Retry or Select button got pressed by mistake, so fail instead and let the model pick again
+        if (!["combobox", "listbox", "spinbutton"].includes(target.role))
+          throw new Error(
+            ["input", "textarea"].includes(target.tag)
+              ? `[${target.id.slice(1)}] is read-only; set it by clicking the page's own picker or list options instead of typing`
+              : `[${target.id.slice(1)}] is not a text field (role ${target.role}); pick the field to type into`,
+          )
+        ctx.log("  (dropdown widget; clicking to open it)")
         return tab.click(target.id)
       }
       if (target.tag === "select") return selectFromDropdown(target, ctx)
       if (target.role === "file upload") return uploadFile(target, ctx)
       const text = await chooseFact(target, ctx)
-      ctx.log(`  type "${text}"`)
-      return tab.fill(target.id, text)
+      ctx.log(`  type "${text}"${ctx.keystrokes ? " (keystrokes)" : ""}`)
+      return tab.fill(target.id, text, { keystrokes: ctx.keystrokes })
     }
     case "hover":
       if (!target) throw new Error("no element to hover")
@@ -320,6 +378,10 @@ async function uploadFile(
     `Needs a file for ${describeElement(target)}. Pass it in files, or attach it with browser_upload.`,
   )
   if (R.isEmpty(files)) throw needsFile
+  const left = filesLeft(files, history)
+  // Everything was already attached (the model just didn't notice), so there's nothing to do rather than a failure
+  if (R.isEmpty(left))
+    return `nothing left to upload (already attached: ${attachedSoFar(history).join(", ")})`
   const answers = await decide({
     model,
     state: {
@@ -334,7 +396,7 @@ async function uploadFile(
           "Which of these files should be uploaded here to achieve the goal?",
         criteria: {
           ...R.mapValues(
-            files,
+            left,
             (path, name) => `${name}: ${path.split("/").at(-1)}`,
           ),
           __none__: "None of these files belongs in this field",
@@ -342,10 +404,10 @@ async function uploadFile(
       },
     },
   })
-  const path = answers.file && files[answers.file.choice]
+  const path = answers.file && left[answers.file.choice]
   if (path == null) throw needsFile
   log(`  upload "${path}"`)
-  await tab.upload(target.id, [path])
+  const outcome = await tab.upload(target.id, [path])
   // The page often doesn't show the attached file (hidden input behind a button), so record it for the next step
-  return `attached ${path.split("/").at(-1)}`
+  return `${outcome} ${path.split("/").at(-1)}`
 }

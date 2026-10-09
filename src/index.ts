@@ -1,5 +1,13 @@
 #!/usr/bin/env bun
-import { chmodSync, cpSync, existsSync, mkdirSync, rmSync } from "node:fs"
+import {
+  chmodSync,
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs"
 import { homedir, tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { parseArgs } from "node:util"
@@ -14,7 +22,7 @@ import * as tab from "./tab.ts"
 const USAGE = `aqb (agent-quick-browse) — drive your own Chrome with a decision model (Jev, GPT-6 Luna Decisions, or Clef)
 
 Usage:
-  aqb run "<goal>" [--url <url>] [--fact key=value ...] [--file name=path ...] [--model jev|luna|clef|clef-flash] [--text|--vision] [--max-steps 25]
+  aqb run "<goal>" [--url <url>] [--fact key=value ...] [--file name=path ...] [--model jev|luna|clef|clef-flash] [--text|--vision] [--keystrokes] [--max-steps 25]
   aqb look [--url <url>] [--text]  Print numbered elements + annotated screenshot (or the text outline)
   aqb tabs                   List open Chrome tabs (id, group, controlling session)
   aqb attach <tabId>         Take over an already-open tab for the session
@@ -22,12 +30,15 @@ Usage:
                                       a tab taken over with attach is always handed back
   aqb close                  Same as release without --keep
   aqb mcp                    Run as a stdio MCP server
-  aqb setup                  Register the native host and print extension install steps
+  aqb setup [--save-keys]    Register the native host and print extension install steps
+                                      (--save-keys: copy API keys from this shell to ~/.aqb/env)
   All commands take --session <name> (default "default") and --group <name> (tab group, default "AQB").
 
 Each session works in its own background tab (grouped as "AQB") in your normal Chrome, with your logins, so
 sessions can run in parallel. Successive commands in a session continue in its tab; omit --url to pick up there.
 Text to type must be passed with --fact, and files to upload with --file; the model picks which one fits each field.
+--keystrokes types text with per-character key events (for rich-text editors that mangle inserted text).
+API keys come from the environment, or from ~/.aqb/env (KEY=value lines) so non-login shells and agents find them.
 --model defaults to the best model your keys allow (Jev, else GPT-6 Luna, else Clef). --text / --vision choose how the
 page is shown (outline vs screenshot); defaults: text for Jev (always) and Luna, screenshots for Clef.
 Keys: AI_GATEWAY_API_KEY covers Jev and Luna; or use TYPESAFE_API_KEY (Jev) / OPENAI_API_KEY (Luna) directly.
@@ -43,12 +54,16 @@ const { values, positionals } = parseArgs({
     text: { type: "boolean", default: false },
     vision: { type: "boolean", default: false },
     "max-steps": { type: "string", default: "25" },
+    keystrokes: { type: "boolean", default: false },
+    "save-keys": { type: "boolean", default: false },
     session: { type: "string", default: "default" },
     group: { type: "string" },
     keep: { type: "boolean", default: false },
     help: { type: "boolean", short: "h", default: false },
   },
 })
+
+loadKeyFile()
 
 const [command, ...rest] = positionals
 
@@ -156,7 +171,7 @@ ${migrated ? `Upgrading from clef-browser: in chrome://extensions, remove "Clef 
   3. Check it shows ID ${EXTENSION_ID}
 After upgrading, re-run setup and click the extension's reload button.
 
-Then try: aqb run "Open the Ask HN page" --url https://news.ycombinator.com`)
+${values["save-keys"] ? saveKeys() : ""}Then try: aqb run "Open the Ask HN page" --url https://news.ycombinator.com`)
 }
 
 async function look() {
@@ -201,6 +216,7 @@ async function run() {
       values.vision ? "vision" : values.text ? "text" : undefined,
     ),
     maxSteps: Number(values["max-steps"]),
+    keystrokes: values.keystrokes,
     log: (line) => console.error(line),
   })
   console.error(
@@ -218,4 +234,45 @@ function parsePairs(pairs: string[]) {
       pair.slice(pair.indexOf("=") + 1),
     ]),
   )
+}
+
+/**
+ * Loads `KEY=value` lines (optionally `export`ed and quoted) from ~/.aqb/env
+ * without overriding the environment, so aqb finds its keys in shells and
+ * agents that don't source the user's shell profile.
+ */
+function loadKeyFile() {
+  const file = join(STATE_DIR, "env")
+  if (!existsSync(file)) return
+  for (const line of readFileSync(file, "utf8").split("\n")) {
+    const match = /^\s*(?:export\s+)?([A-Z_][A-Z0-9_]*)\s*=\s*(.*?)\s*$/.exec(
+      line,
+    )
+    if (match?.[1] && process.env[match[1]] == null)
+      process.env[match[1]] = (match[2] ?? "").replace(/^(["'])(.*)\1$/, "$2")
+  }
+}
+
+/**
+ * Writes the API keys set in this shell to ~/.aqb/env (owner-only) and returns
+ * a line for the setup output.
+ */
+function saveKeys() {
+  const found = [
+    "AI_GATEWAY_API_KEY",
+    "TYPESAFE_API_KEY",
+    "OPENAI_API_KEY",
+    "CLOUDFLARE_AI_ACCOUNT_ID",
+    "CLOUDFLARE_AI_API_TOKEN",
+    "JEV_MODEL",
+  ].filter((name) => process.env[name])
+  if (!found.length) return "No API keys found in this shell to save.\n\n"
+  const file = join(STATE_DIR, "env")
+  writeFileSync(
+    file,
+    found.map((name) => `${name}=${process.env[name]}`).join("\n") + "\n",
+    { mode: 0o600 },
+  )
+  chmodSync(file, 0o600)
+  return `Saved ${found.join(", ")} to ${file}.\n\n`
 }

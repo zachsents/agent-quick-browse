@@ -92,6 +92,12 @@ Ask the user before anything that purchases, sends, posts, deletes, or submits.`
             'Local files the model may upload, name → absolute path, e.g. {"resume": "/Users/me/resume.pdf"}. Uploads never open a file picker.',
           ),
         max_steps: z.number().int().min(1).max(40).default(12),
+        keystrokes: z
+          .boolean()
+          .optional()
+          .describe(
+            "Type text with real per-character key events instead of inserting it in one go. Slower; use it when a rich-text editor mangles or drops inserted text, or only reacts to typing (hashtag/mention pickers).",
+          ),
         model: z
           .enum(["clef", "clef-flash", "jev", "luna"])
           .optional()
@@ -107,22 +113,34 @@ Ask the user before anything that purchases, sends, posts, deletes, or submits.`
         ...sessionArg,
       },
     },
-    inSession(async ({ goal, url, facts, files, max_steps, model, view }) => {
-      if (url) await tab.goto(url)
-      const log: string[] = []
-      const result = await runAgent({
+    inSession(
+      async ({
         goal,
-        facts: facts ?? {},
-        files: files ?? {},
-        model: model ?? defaultModel(),
-        mode: resolveMode(model ?? defaultModel(), view),
-        maxSteps: max_steps,
-        log: (line) => log.push(line),
-      })
-      return text(
-        `${JSON.stringify(result, null, 2)}\n\nstep log:\n${log.join("\n")}`,
-      )
-    }),
+        url,
+        facts,
+        files,
+        max_steps,
+        model,
+        view,
+        keystrokes,
+      }) => {
+        if (url) await tab.goto(url)
+        const log: string[] = []
+        const result = await runAgent({
+          goal,
+          facts: facts ?? {},
+          files: files ?? {},
+          keystrokes,
+          model: model ?? defaultModel(),
+          mode: resolveMode(model ?? defaultModel(), view),
+          maxSteps: max_steps,
+          log: (line) => log.push(line),
+        })
+        return text(
+          `${JSON.stringify(result, null, 2)}\n\nstep log:\n${log.join("\n")}`,
+        )
+      },
+    ),
   )
 
   server.registerTool(
@@ -192,16 +210,22 @@ Ask the user before anything that purchases, sends, posts, deletes, or submits.`
     "browser_type",
     {
       description:
-        "Replace the contents of a numbered text field (from the latest browser_look) with `text`, optionally pressing Enter.",
+        "Replace the contents of a numbered text field (from the latest browser_look) with `text`, optionally pressing Enter. Fails if the field doesn't end up containing the text.",
       inputSchema: {
         element: z.number().int().min(1),
         text: z.string(),
         submit: z.boolean().default(false),
+        keystrokes: z
+          .boolean()
+          .optional()
+          .describe(
+            "Type text with real per-character key events instead of inserting it in one go. Slower; use it when a rich-text editor mangles or drops inserted text, or only reacts to typing (hashtag/mention pickers).",
+          ),
         ...sessionArg,
       },
     },
-    inSession(async ({ element, text: value, submit }) => {
-      await tab.fill(`e${element}`, value)
+    inSession(async ({ element, text: value, submit, keystrokes }) => {
+      await tab.fill(`e${element}`, value, { keystrokes })
       if (submit) {
         await tab.pressEnter()
         await tab.waitForLoad()

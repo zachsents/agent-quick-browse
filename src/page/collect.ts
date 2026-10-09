@@ -51,6 +51,99 @@ function ancestors(el: Element) {
   return chain
 }
 
+/**
+ * "checked" / "unchecked" for anything that acts as a toggle, else false.
+ * Covers native checkboxes and radios, ARIA switches and checkboxes, and custom
+ * switches that wrap or label a hidden checkbox (TikTok's AI-content toggle),
+ * whose state is otherwise invisible in text.
+ */
+function toggleState(el: HTMLElement) {
+  const aria = el.getAttribute("aria-checked")
+  if (aria === "true" || aria === "false")
+    return aria === "true" ? "checked" : "unchecked"
+  const box =
+    el instanceof HTMLInputElement
+      ? el
+      : el instanceof HTMLLabelElement
+        ? el.control
+        : el.querySelector(
+            "input[type=checkbox], input[type=radio], [role=switch], [role=checkbox]",
+          )
+  if (
+    box instanceof HTMLInputElement &&
+    (box.type === "checkbox" || box.type === "radio")
+  )
+    return box.checked ? "checked" : "unchecked"
+  const nestedAria = box?.getAttribute("aria-checked")
+  return nestedAria === "true"
+    ? "checked"
+    : nestedAria === "false"
+      ? "unchecked"
+      : false
+}
+
+/**
+ * True when a scrolling or clipping ancestor (e.g. a list with overflow: auto)
+ * hides the element's center.
+ */
+function clippedByContainer(el: Element) {
+  const r = el.getBoundingClientRect()
+  const x = r.left + r.width / 2
+  const y = r.top + r.height / 2
+  for (
+    let parent = el.parentElement;
+    parent && parent !== document.body;
+    parent = parent.parentElement
+  ) {
+    if (getComputedStyle(parent).overflow === "visible") continue
+    const p = parent.getBoundingClientRect()
+    if (x < p.left || x > p.right || y < p.top || y > p.bottom) return true
+  }
+  return false
+}
+
+/**
+ * For list items and options, which list they're in ("in minutes"), taken from
+ * the list's aria-label, labelling element, or id. Bare items like "12" are
+ * otherwise ambiguous when a picker has several lists (hours vs minutes).
+ */
+function listContext(el: HTMLElement) {
+  if (
+    !el.matches("li, option, [role=option], [role=menuitem], [role=gridcell]")
+  )
+    return ""
+  const list = el.closest(
+    "ul, ol, select, [role=listbox], [role=menu], [role=grid], [role=list]",
+  )
+  if (!list) return ""
+  const labelledBy = list.getAttribute("aria-labelledby")
+  const name =
+    list.getAttribute("aria-label") ??
+    (labelledBy ? document.getElementById(labelledBy)?.textContent : null) ??
+    (/^[a-z][\w-]{2,30}$/i.test(list.id) ? list.id : null)
+  return name ? `in ${clean(name)}` : ""
+}
+
+/**
+ * "attached: a.pdf, b.png" for a file input, or for an upload button / drop
+ * zone sitting next to one (the input is often hidden behind the button), so
+ * the model can see an upload already happened.
+ */
+function attachedFiles(el: HTMLElement) {
+  let input: Element | null = el.matches("input[type=file]") ? el : null
+  for (
+    let scope: Element | null = el, depth = 0;
+    !input && scope && depth < 3;
+    scope = scope.parentElement, depth++
+  )
+    input = scope.querySelector("input[type=file]")
+  const names =
+    input instanceof HTMLInputElement
+      ? [...(input.files ?? [])].map((file) => file.name)
+      : []
+  return names.length ? `attached: ${names.join(", ")}` : ""
+}
+
 /** ARIA role, falling back to the implicit role of native elements. */
 function implicitRole(el: HTMLElement) {
   const explicit = el.getAttribute("role")
@@ -97,6 +190,8 @@ export function collect({
     [...document.querySelectorAll(selector), ...pointerTargets()].filter(
       (el): el is HTMLElement => {
         if (!(el instanceof HTMLElement) || !el.checkVisibility()) return false
+        // Links and buttons inside a rich-text editor are part of its content; the editor itself is the target
+        if (el.parentElement?.isContentEditable) return false
         const r = el.getBoundingClientRect()
         if (r.width < 4 || r.height < 4) return false
         const shown = el.checkVisibility({
@@ -104,6 +199,9 @@ export function collect({
           visibilityProperty: true,
         })
         if (!inViewport(r)) return shown && mode === "text"
+        // Scrolled out of view inside a list or panel: actionable in text mode (it gets scrolled into view first), but
+        // not visible in a screenshot
+        if (clippedByContainer(el)) return shown && mode === "text"
         // Drop on-screen elements covered by something else (modals, sticky headers)
         const hit = document.elementFromPoint(
           r.left + r.width / 2,
@@ -122,7 +220,10 @@ export function collect({
       .filter((el) => !hoverOnly.has(el))
       .flatMap((el) => ancestors(el)),
   )
-  const leaves = [...candidates].filter((el) => !hasCandidateInside.has(el))
+  // A rich-text editor root stays a target even when its content holds links or mentions
+  const leaves = [...candidates].filter(
+    (el) => !hasCandidateInside.has(el) || el.isContentEditable,
+  )
   const kept = new Set(
     [...leaves].toSorted((a, b) => distance(a) - distance(b)).slice(0, 254),
   )
@@ -160,9 +261,7 @@ export function collect({
       el.getAttribute("alt"),
     ].map(clean)
     const states = [
-      ((input instanceof HTMLInputElement && input.checked) ||
-        el.getAttribute("aria-checked") === "true") &&
-        "checked",
+      toggleState(el),
       el.getAttribute("aria-selected") === "true" && "selected",
       el.getAttribute("aria-pressed") === "true" && "pressed",
       el.getAttribute("aria-expanded") &&
@@ -179,29 +278,44 @@ export function collect({
       id,
       tag: el.tagName.toLowerCase(),
       role: implicitRole(el),
-      label: [...new Set([...parts.filter(Boolean), ...states])]
+      label: [
+        ...new Set(
+          [
+            ...parts.filter(Boolean),
+            ...states,
+            listContext(el),
+            attachedFiles(el),
+          ].filter(Boolean),
+        ),
+      ]
         .join(" | ")
         .slice(0, 120),
       href: el.getAttribute("href")?.slice(0, 80) ?? null,
       // Whether text can be typed into it; custom widgets (div role=combobox, etc.) get clicked instead
+      // Read-only or disabled fields (e.g. TikTok's time box, set via its pickers) can't be typed into
       editable:
-        el.isContentEditable ||
-        el instanceof HTMLTextAreaElement ||
-        (el instanceof HTMLInputElement &&
-          ![
-            "radio",
-            "checkbox",
-            "button",
-            "submit",
-            "reset",
-            "image",
-            "file",
-            "range",
-            "color",
-          ].includes(el.type)),
-      offscreen: inViewport(r)
-        ? null
-        : `${r.top < 0 ? "above" : "below"}, ~${screens} screen${screens > 1 ? "s" : ""}`,
+        !el.matches(
+          ":disabled, [readonly], [aria-readonly=true], [aria-disabled=true]",
+        ) &&
+        (el.isContentEditable ||
+          el instanceof HTMLTextAreaElement ||
+          (el instanceof HTMLInputElement &&
+            ![
+              "radio",
+              "checkbox",
+              "button",
+              "submit",
+              "reset",
+              "image",
+              "file",
+              "range",
+              "color",
+            ].includes(el.type))),
+      offscreen: clippedByContainer(el)
+        ? "scrolled out of view in its list/panel"
+        : inViewport(r)
+          ? null
+          : `${r.top < 0 ? "above" : "below"}, ~${screens} screen${screens > 1 ? "s" : ""}`,
     }
   })
 

@@ -252,11 +252,19 @@ async function elementCenter(id: string) {
       const el = document.querySelector(`[data-aqb-id="${targetId}"]`)
       if (!el) throw new Error(`element ${targetId} is gone`)
       const r = el.getBoundingClientRect()
+      // Visible only if it's inside the window and actually hit-testable there; elements clipped inside a scrolled
+      // list hit an ancestor instead and need their container scrolled
+      const hit = document.elementFromPoint(
+        r.left + r.width / 2,
+        r.top + r.height / 2,
+      )
       if (
         r.top >= 0 &&
         r.left >= 0 &&
         r.bottom <= innerHeight &&
-        r.right <= innerWidth
+        r.right <= innerWidth &&
+        hit &&
+        (hit === el || el.contains(hit))
       )
         return []
       const scrollers: Element[] = []
@@ -430,17 +438,84 @@ export async function click(id: string) {
   })
 }
 
-/** Focuses the field, selects its existing contents, and types over them. */
-export async function fill(id: string, text: string) {
+/**
+ * Replaces a field's contents with `text`, then reads it back and throws if it
+ * didn't stick. Selecting and clearing go through Chrome's own editing commands
+ * (what Cmd+A and Delete do), which rich-text editors like TikTok's description
+ * box respect, unlike selecting from a page script. The text is inserted in one
+ * go by default; `keystrokes` types it character by character with real key
+ * events instead, for editors that only react to typing (hashtag or mention
+ * pickers, editors that drop pasted text).
+ */
+export async function fill(
+  id: string,
+  text: string,
+  { keystrokes = false } = {},
+) {
   await click(id)
-  await evaluate(() => {
-    const el = document.activeElement
-    if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)
-      el.select()
-    else if (el instanceof HTMLElement && el.isContentEditable)
-      getSelection()?.selectAllChildren(el)
-  })
-  await cdp("Input.insertText", { text })
+  await pressKey({ key: "a", code: "KeyA", windowsVirtualKeyCode: 65 }, [
+    "selectAll",
+  ])
+  await pressKey(
+    { key: "Backspace", code: "Backspace", windowsVirtualKeyCode: 8 },
+    ["deleteBackward"],
+  )
+  if (keystrokes)
+    for (const char of text) {
+      await cdp("Input.dispatchKeyEvent", {
+        type: "keyDown",
+        key: char,
+        text: char,
+        unmodifiedText: char,
+      })
+      await cdp("Input.dispatchKeyEvent", { type: "keyUp", key: char })
+      await Bun.sleep(15)
+    }
+  else await cdp("Input.insertText", { text })
+
+  const value = z.string().parse(
+    await evaluate((targetId) => {
+      // The click may have focused an inner editor (e.g. a contenteditable inside a combobox wrapper)
+      const focused = document.activeElement
+      const el =
+        focused &&
+        (focused instanceof HTMLInputElement ||
+          focused instanceof HTMLTextAreaElement ||
+          (focused instanceof HTMLElement && focused.isContentEditable))
+          ? focused
+          : document.querySelector(`[data-aqb-id="${targetId}"]`)
+      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)
+        return el.value
+      return el instanceof HTMLElement ? el.innerText : ""
+    }, id),
+  )
+  if (normalize(value) !== normalize(text))
+    throw new Error(
+      `the field didn't end up with the text; it now reads "${value.slice(0, 120)}"${keystrokes ? "" : " (try keystrokes typing)"}`,
+    )
+}
+
+/**
+ * Text compared loosely: invisible zero-width characters dropped and whitespace
+ * collapsed (editors insert both).
+ */
+function normalize(text: string) {
+  return text
+    .replaceAll(/[\u200b-\u200d\ufeff]/g, "")
+    .replaceAll(/\s+/g, " ")
+    .trim()
+}
+
+/**
+ * Presses one key, optionally running Chrome editing commands with it (e.g.
+ * "selectAll", "deleteBackward").
+ */
+async function pressKey(
+  key: { key: string; code: string; windowsVirtualKeyCode: number },
+  commands: string[] = [],
+) {
+  await cdp("Input.dispatchKeyEvent", { type: "rawKeyDown", ...key, commands })
+  await cdp("Input.dispatchKeyEvent", { type: "keyUp", ...key })
 }
 
 /**
@@ -458,10 +533,24 @@ export async function upload(id: string, paths: string[]) {
     )
   if (!result.objectId)
     throw new Error("no file input found behind this element")
+  // Re-attaching restarts the upload on many sites, so skip files that are already attached
+  const attached = z
+    .object({ result: z.object({ value: z.array(z.string()) }) })
+    .parse(
+      await cdp("Runtime.callFunctionOn", {
+        objectId: result.objectId,
+        functionDeclaration:
+          "function () { return [...(this.files ?? [])].map((f) => f.name) }",
+        returnByValue: true,
+      }),
+    ).result.value
+  const names = paths.map((path) => path.split("/").at(-1) ?? path)
+  if (names.every((name) => attached.includes(name))) return "already attached"
   await cdp("DOM.setFileInputFiles", {
     files: paths,
     objectId: result.objectId,
   })
+  return "attached"
 }
 
 /**
