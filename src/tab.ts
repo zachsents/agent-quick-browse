@@ -33,7 +33,10 @@ const evaluateResultSchema = z.object({
 })
 const rectSchema = z.object({ x: z.number(), y: z.number() })
 
-async function rpc(method: "cdp" | "tab" | "close", params?: object) {
+async function rpc(
+  method: "cdp" | "tab" | "close" | "sequence",
+  params?: object,
+) {
   const res = await fetch("http://localhost/rpc", {
     unix: SOCKET_PATH,
     method: "POST",
@@ -242,24 +245,30 @@ async function elementCenter(id: string) {
  * ~300ms of eased frames.
  */
 async function animateScroll(moves: z.infer<typeof scrollMovesSchema>) {
-  const frames = 18
-  const started = performance.now()
-  for (let frame = 1; frame <= frames; frame++) {
-    const t = frame / frames
-    const eased = t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2
-    await evaluate(
-      ({ moves, eased, last }) => {
-        for (const { id, from, to } of moves) {
-          const el = document.querySelector(`[data-clef-scroll="${id}"]`)
-          if (!el) continue
-          el.scrollLeft = from[0] + (to[0] - from[0]) * eased
-          el.scrollTop = from[1] + (to[1] - from[1]) * eased
-          if (last) el.removeAttribute("data-clef-scroll")
-        }
-      },
-      { moves, eased, last: frame === frames },
-    )
-    await Bun.sleep(Math.max(0, started + t * 300 - performance.now()))
+  await playFrames(300, (eased, isLast) => ({
+    method: "Runtime.evaluate",
+    params: {
+      expression: `(${applyScroll.toString()})(${JSON.stringify({ moves, eased, isLast })})`,
+    },
+  }))
+}
+
+/** Runs in the page: sets each tagged scroll container to its eased position. */
+function applyScroll({
+  moves,
+  eased,
+  isLast,
+}: {
+  moves: z.infer<typeof scrollMovesSchema>
+  eased: number
+  isLast: boolean
+}) {
+  for (const { id, from, to } of moves) {
+    const el = document.querySelector(`[data-clef-scroll="${id}"]`)
+    if (!el) continue
+    el.scrollLeft = from[0] + (to[0] - from[0]) * eased
+    el.scrollTop = from[1] + (to[1] - from[1]) * eased
+    if (isLast) el.removeAttribute("data-clef-scroll")
   }
 }
 
@@ -278,19 +287,44 @@ async function movePointer(x: number, y: number) {
   const session = sessionStore.getStore() ?? "default"
   const from = pointers.get(session) ?? { x, y }
   const duration = Math.min(500, 100 + Math.hypot(x - from.x, y - from.y) * 0.4)
-  const frames = Math.max(1, Math.round(duration / 16))
-  const started = performance.now()
-  for (let frame = 1; frame <= frames; frame++) {
-    const t = frame / frames
-    const eased = t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2
-    await cdp("Input.dispatchMouseEvent", {
+  await playFrames(duration, (eased) => ({
+    method: "Input.dispatchMouseEvent",
+    params: {
       type: "mouseMoved",
       x: from.x + (x - from.x) * eased,
       y: from.y + (y - from.y) * eased,
-    })
-    await Bun.sleep(Math.max(0, started + t * duration - performance.now()))
-  }
+    },
+  }))
   pointers.set(session, { x, y })
+}
+
+/** Ease-in-out curve for animations, t in [0, 1]. */
+function easeInOut(t: number) {
+  return t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2
+}
+
+/**
+ * Plays an animation by sending one CDP command per ~16ms frame over `duration`
+ * ms, paced from here. (Handing the whole sequence to the extension to play was
+ * measured to be choppier under load: its timers stall while it relays
+ * screenshots for other sessions.)
+ */
+async function playFrames(
+  duration: number,
+  frame: (
+    eased: number,
+    isLast: boolean,
+  ) => { method: string; params: Record<string, unknown> },
+) {
+  const frames = Math.max(1, Math.round(duration / 16))
+  const started = performance.now()
+  for (let i = 1; i <= frames; i++) {
+    const { method, params } = frame(easeInOut(i / frames), i === frames)
+    await cdp(method, params)
+    await Bun.sleep(
+      Math.max(0, started + (i / frames) * duration - performance.now()),
+    )
+  }
 }
 
 /**
@@ -336,6 +370,49 @@ export async function fill(id: string, text: string) {
       getSelection()?.selectAllChildren(el)
   })
   await cdp("Input.insertText", { text })
+}
+
+/**
+ * Attaches local files to the file input behind a numbered element: the input
+ * itself, an upload button or drop zone that contains or labels one, or the
+ * page's only file input. Uses CDP, so no OS file picker ever opens.
+ */
+export async function upload(id: string, paths: string[]) {
+  const { result } = z
+    .object({ result: z.object({ objectId: z.string().optional() }) })
+    .parse(
+      await cdp("Runtime.evaluate", {
+        expression: `(${findFileInput.toString()})(${JSON.stringify(id)})`,
+      }),
+    )
+  if (!result.objectId)
+    throw new Error("no file input found behind this element")
+  await cdp("DOM.setFileInputFiles", {
+    files: paths,
+    objectId: result.objectId,
+  })
+}
+
+/**
+ * Runs in the page: finds the `<input type=file>` a numbered element stands for
+ * (often hidden behind a button).
+ */
+function findFileInput(clefId: string) {
+  const el = document.querySelector(`[data-clef-id="${clefId}"]`)
+  if (!el) throw new Error(`element ${clefId} is gone`)
+  if (el.matches("input[type=file]")) return el
+  if (el instanceof HTMLLabelElement && el.control?.matches("input[type=file]"))
+    return el.control
+  for (
+    let scope: Element | null = el, depth = 0;
+    scope && depth < 5;
+    scope = scope.parentElement, depth++
+  ) {
+    const input = scope.querySelector("input[type=file]")
+    if (input) return input
+  }
+  const all = document.querySelectorAll("input[type=file]")
+  return all.length === 1 ? all[0] : null
 }
 
 export async function selectOption(id: string, label: string) {
@@ -404,22 +481,16 @@ export async function scroll(direction: 1 | -1) {
   if (!canScrollHere) await movePointer(center.x, center.y)
   const { x, y } = canScrollHere ? pointer : center
   const total = direction * viewport.height * 0.8
-  const frames = 18
-  const started = performance.now()
+  // Wheel deltas are per frame, so send the difference between consecutive eased positions
   let scrolled = 0
-  for (let frame = 1; frame <= frames; frame++) {
-    const t = frame / frames
-    const target = total * (t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2)
-    await cdp("Input.dispatchMouseEvent", {
-      type: "mouseWheel",
-      x,
-      y,
-      deltaX: 0,
-      deltaY: target - scrolled,
-    })
-    scrolled = target
-    await Bun.sleep(Math.max(0, started + t * 300 - performance.now()))
-  }
+  await playFrames(300, (eased) => {
+    const delta = total * eased - scrolled
+    scrolled = total * eased
+    return {
+      method: "Input.dispatchMouseEvent",
+      params: { type: "mouseWheel", x, y, deltaX: 0, deltaY: delta },
+    }
+  })
 }
 
 export async function goBack() {

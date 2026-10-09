@@ -64,6 +64,7 @@ function implicitRole(el: HTMLElement) {
         checkbox: "checkbox",
         radio: "radio",
         search: "searchbox",
+        file: "file upload",
         button: "button",
         submit: "button",
         range: "slider",

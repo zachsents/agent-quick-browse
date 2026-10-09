@@ -1,0 +1,39 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Upload test</title>
+<style>
+  body {
+    font: 16px system-ui;
+    margin: 24px;
+  }
+  .drop {
+    border: 2px dashed #999;
+    padding: 24px;
+    margin: 12px 0;
+    text-align: center;
+  }
+</style>
+<h1>Upload test</h1>
+<p>Resume: <b id="resume-result">none</b></p>
+<p>Photo: <b id="photo-result">none</b></p>
+<label>Resume <input type="file" id="resume" /></label>
+<!-- Typical drop zone: the real input is hidden and the visible button forwards the click -->
+<div class="drop">
+  Drag a profile photo here or
+  <button type="button" id="choose-photo">Choose photo</button>
+  <input type="file" id="photo" accept="image/*" hidden />
+</div>
+<script>
+  const show = (input, target) =>
+    input.addEventListener("change", () => {
+      const file = input.files[0]
+      document.getElementById(target).textContent = file
+        ? `${file.name} (${file.size} bytes)`
+        : "none"
+    })
+  show(document.getElementById("resume"), "resume-result")
+  show(document.getElementById("photo"), "photo-result")
+  document
+    .getElementById("choose-photo")
+    .addEventListener("click", () => document.getElementById("photo").click())
+</script>

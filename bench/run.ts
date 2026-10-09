@@ -16,6 +16,8 @@ const CONFIGS: Record<string, { model: DecisionModel; mode: SnapshotMode }> = {
   "clef-text": { model: "clef", mode: "text" },
   "flash-vision": { model: "clef-flash", mode: "vision" },
   jev: { model: "jev", mode: "text" },
+  "luna-vision": { model: "luna", mode: "vision" },
+  "luna-text": { model: "luna", mode: "text" },
 }
 
 const { values } = parseArgs({
@@ -77,6 +79,7 @@ async function runJob({
             ? trial.goal
             : trial.goal(expected ?? ""),
         facts: trial.facts ?? {},
+        files: {},
         model,
         mode,
         maxSteps: trial.maxSteps,

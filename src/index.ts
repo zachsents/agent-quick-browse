@@ -1,18 +1,19 @@
 #!/usr/bin/env bun
-import { chmodSync, cpSync, mkdirSync, rmSync } from "node:fs"
+import { chmodSync, cpSync, existsSync, mkdirSync, rmSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { parseArgs } from "node:util"
+import * as R from "remeda"
 import { z } from "zod"
 import { runAgent } from "./agent.ts"
 import { EXTENSION_ID, HOST_NAME, STATE_DIR } from "./paths.ts"
 import { describeElement, snapshotPage } from "./snapshot.ts"
 import * as tab from "./tab.ts"
 
-const USAGE = `clef-browser — drive your own Chrome with a decision model (Clef or Jev)
+const USAGE = `clef-browser — drive your own Chrome with a decision model (Jev, GPT-6 Luna Decisions, or Clef)
 
 Usage:
-  clef-browser run "<goal>" [--url <url>] [--fact key=value ...] [--model jev|clef|clef-flash] [--text] [--max-steps 25]
+  clef-browser run "<goal>" [--url <url>] [--fact key=value ...] [--file name=path ...] [--model jev|luna|clef|clef-flash] [--text] [--max-steps 25]
   clef-browser look [--url <url>] [--text]  Print numbered elements + annotated screenshot (or the text outline)
   clef-browser close                  Close the session's tab
   clef-browser mcp                    Run as a stdio MCP server
@@ -21,15 +22,16 @@ Usage:
 
 Each session works in its own background tab (grouped as "Clef") in your normal Chrome, with your logins, so
 sessions can run in parallel. Successive commands in a session continue in its tab; omit --url to pick up there.
-Text to type must be passed with --fact; Clef picks which fact fits each field.
+Text to type must be passed with --fact, and files to upload with --file; the model picks which one fits each field.
 --text describes the page as a whole-page text outline instead of a screenshot (always on for Jev).
-Env: CLOUDFLARE_AI_ACCOUNT_ID, CLOUDFLARE_AI_API_TOKEN (Clef), AI_GATEWAY_API_KEY (Jev)`
+Env: AI_GATEWAY_API_KEY (Jev, Luna), CLOUDFLARE_AI_ACCOUNT_ID + CLOUDFLARE_AI_API_TOKEN (Clef)`
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,
   options: {
     url: { type: "string" },
     fact: { type: "string", multiple: true, default: [] },
+    file: { type: "string", multiple: true, default: [] },
     model: { type: "string", default: "jev" },
     text: { type: "boolean", default: false },
     "max-steps": { type: "string", default: "25" },
@@ -142,17 +144,20 @@ async function run() {
     throw new Error(
       'run needs a goal, e.g. clef-browser run "find the weather in Austin"',
     )
-  const model = z.enum(["clef", "clef-flash", "jev"]).parse(values.model)
+  const model = z
+    .enum(["clef", "clef-flash", "jev", "luna"])
+    .parse(values.model)
   if (values.url) await tab.goto(values.url)
   const started = performance.now()
   const result = await runAgent({
     goal,
-    facts: Object.fromEntries(
-      values.fact.map((f) => [
-        f.slice(0, f.indexOf("=")),
-        f.slice(f.indexOf("=") + 1),
-      ]),
-    ),
+    facts: parsePairs(values.fact),
+    files: R.mapValues(parsePairs(values.file), (path, name) => {
+      const absolute = resolve(path)
+      if (!existsSync(absolute))
+        throw new Error(`--file ${name}: ${absolute} does not exist`)
+      return absolute
+    }),
     model,
     mode: model === "jev" || values.text ? "text" : "vision",
     maxSteps: Number(values["max-steps"]),
@@ -163,4 +168,14 @@ async function run() {
   )
   console.log(JSON.stringify(result))
   process.exitCode = result.status === "done" ? 0 : 2
+}
+
+/** Parses repeated `key=value` flags into an object (values may contain "="). */
+function parsePairs(pairs: string[]) {
+  return Object.fromEntries(
+    pairs.map((pair) => [
+      pair.slice(0, pair.indexOf("=")),
+      pair.slice(pair.indexOf("=") + 1),
+    ]),
+  )
 }

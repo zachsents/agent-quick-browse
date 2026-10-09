@@ -62,12 +62,18 @@ Ask the user before anything that purchases, sends, posts, deletes, or submits.`
           .describe(
             'The only text the model can type — it picks which value fits each field, e.g. {"search": "Cloudflare"}. If a field needs text that is not here, the run stops as blocked with a reason.',
           ),
+        files: z
+          .record(z.string(), z.string())
+          .optional()
+          .describe(
+            'Local files the model may upload, name → absolute path, e.g. {"resume": "/Users/me/resume.pdf"}. Uploads never open a file picker.',
+          ),
         max_steps: z.number().int().min(1).max(40).default(12),
         model: z
-          .enum(["clef", "clef-flash", "jev"])
+          .enum(["clef", "clef-flash", "jev", "luna"])
           .default("jev")
           .describe(
-            "jev (default: text-only, fastest, best in benchmarks; needs AI_GATEWAY_API_KEY), clef (27B, sees screenshots), clef-flash (9B, faster); clef models need Cloudflare keys",
+            "jev (default: text-only, fastest), luna (OpenAI GPT-6 Luna Decisions, sees screenshots; both need AI_GATEWAY_API_KEY), clef (27B, sees screenshots), clef-flash (9B, faster); clef models need Cloudflare keys",
           ),
         text_only: z
           .boolean()
@@ -78,21 +84,24 @@ Ask the user before anything that purchases, sends, posts, deletes, or submits.`
         ...sessionArg,
       },
     },
-    inSession(async ({ goal, url, facts, max_steps, model, text_only }) => {
-      if (url) await tab.goto(url)
-      const log: string[] = []
-      const result = await runAgent({
-        goal,
-        facts: facts ?? {},
-        model,
-        mode: model === "jev" || text_only ? "text" : "vision",
-        maxSteps: max_steps,
-        log: (line) => log.push(line),
-      })
-      return text(
-        `${JSON.stringify(result, null, 2)}\n\nstep log:\n${log.join("\n")}`,
-      )
-    }),
+    inSession(
+      async ({ goal, url, facts, files, max_steps, model, text_only }) => {
+        if (url) await tab.goto(url)
+        const log: string[] = []
+        const result = await runAgent({
+          goal,
+          facts: facts ?? {},
+          files: files ?? {},
+          model,
+          mode: model === "jev" || text_only ? "text" : "vision",
+          maxSteps: max_steps,
+          log: (line) => log.push(line),
+        })
+        return text(
+          `${JSON.stringify(result, null, 2)}\n\nstep log:\n${log.join("\n")}`,
+        )
+      },
+    ),
   )
 
   server.registerTool(
@@ -189,6 +198,27 @@ Ask the user before anything that purchases, sends, posts, deletes, or submits.`
     },
     inSession(async ({ element }) => {
       await tab.hover(`e${element}`)
+      await tab.waitForLoad()
+      return pageInfo()
+    }),
+  )
+
+  server.registerTool(
+    "browser_upload",
+    {
+      description:
+        "Attach local files to a numbered file input, upload button, or drop zone from the latest browser_look (no file picker opens).",
+      inputSchema: {
+        element: z.number().int().min(1),
+        paths: z
+          .array(z.string())
+          .min(1)
+          .describe("Absolute paths of local files"),
+        ...sessionArg,
+      },
+    },
+    inSession(async ({ element, paths }) => {
+      await tab.upload(`e${element}`, paths)
       await tab.waitForLoad()
       return pageInfo()
     }),

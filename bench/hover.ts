@@ -29,6 +29,7 @@ const goals = [
 const configs: { name: string; model: DecisionModel; mode: SnapshotMode }[] = [
   { name: "jev", model: "jev", mode: "text" },
   { name: "clef-vision", model: "clef", mode: "vision" },
+  { name: "luna-vision", model: "luna", mode: "vision" },
 ]
 
 const results = await Promise.all(
@@ -40,6 +41,7 @@ const results = await Promise.all(
         const result = await runAgent({
           goal,
           facts: {},
+          files: {},
           model: config.model,
           mode: config.mode,
           maxSteps: 6,

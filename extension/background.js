@@ -119,29 +119,50 @@ async function groupTabOnce(tabId) {
 }
 
 /**
- * Draws a pink arrow that follows mouse events, so you can watch where the
- * agent's pointer is. Built with DOM APIs (not innerHTML) so it works on
- * Trusted Types pages like Gmail, and ignores pointer events so it never blocks
+ * Shows where the agent's pointer is: a small glowing violet→cyan orb with a
+ * soft halo, centered on the pointer, that ripples on clicks. It fades in on
+ * mouse activity and out after 2.5s idle, and a short transform transition
+ * smooths over uneven event timing. Built only with DOM APIs and the Web
+ * Animations API (no innerHTML or <style>), so strict Trusted Types / CSP pages
+ * like Gmail allow it, and it ignores pointer events so it never blocks
  * clicks.
  */
 const CURSOR_SCRIPT = `(() => {
   if (window.__clefCursor) return
   window.__clefCursor = true
-  const ns = "http://www.w3.org/2000/svg"
-  const cursor = document.createElementNS(ns, "svg")
-  cursor.setAttribute("width", "22")
-  cursor.setAttribute("height", "22")
-  cursor.setAttribute("viewBox", "0 0 22 22")
-  cursor.style.cssText = "position:fixed;left:0;top:0;pointer-events:none;z-index:2147483647;transform:translate(-100px,-100px);transition:none;filter:drop-shadow(0 1px 2px rgba(0,0,0,.4))"
-  const arrow = document.createElementNS(ns, "path")
-  arrow.setAttribute("d", "M2 2 L2 18 L6.5 13.5 L9.5 20 L12.5 18.6 L9.6 12.4 L16 12.4 Z")
-  arrow.setAttribute("fill", "#ec4899")
-  arrow.setAttribute("stroke", "white")
-  arrow.setAttribute("stroke-width", "1.5")
-  cursor.append(arrow)
+  const orb = document.createElement("div")
+  orb.style.cssText =
+    "position:fixed;left:0;top:0;width:14px;height:14px;margin:-7px 0 0 -7px;border-radius:50%;pointer-events:none;" +
+    "z-index:2147483647;opacity:0;background:radial-gradient(circle at 35% 30%,#e0f2fe 0%,#22d3ee 35%,#8b5cf6 100%);" +
+    "box-shadow:0 0 0 3px rgba(139,92,246,.18),0 0 14px 4px rgba(34,211,238,.45),0 0 28px 8px rgba(139,92,246,.25);" +
+    "transition:opacity .25s ease,transform 50ms linear;transform:translate(-100px,-100px)"
+  let hideTimer
+  let x = -100
+  let y = -100
+  const show = () => {
+    if (!orb.isConnected) document.documentElement.append(orb)
+    orb.style.opacity = "1"
+    clearTimeout(hideTimer)
+    hideTimer = setTimeout(() => (orb.style.opacity = "0"), 2500)
+  }
   addEventListener("mousemove", (event) => {
-    cursor.style.transform = "translate(" + event.clientX + "px," + event.clientY + "px)"
-    if (!cursor.isConnected) document.documentElement.append(cursor)
+    x = event.clientX
+    y = event.clientY
+    orb.style.transform = "translate(" + x + "px," + y + "px)"
+    show()
+  }, { capture: true, passive: true })
+  addEventListener("mousedown", () => {
+    show()
+    orb.animate([{ scale: 1 }, { scale: 0.7 }, { scale: 1 }], { duration: 220, easing: "ease-out" })
+    const ripple = document.createElement("div")
+    ripple.style.cssText =
+      "position:fixed;width:44px;height:44px;margin:-22px 0 0 -22px;border-radius:50%;pointer-events:none;" +
+      "z-index:2147483646;border:2px solid rgba(34,211,238,.9);box-shadow:0 0 16px rgba(139,92,246,.6);" +
+      "left:" + x + "px;top:" + y + "px"
+    document.documentElement.append(ripple)
+    ripple
+      .animate([{ transform: "scale(.15)", opacity: 1 }, { transform: "scale(1.3)", opacity: 0 }], { duration: 500, easing: "ease-out" })
+      .finished.then(() => ripple.remove(), () => ripple.remove())
   }, { capture: true, passive: true })
 })()`
 
@@ -185,6 +206,12 @@ async function ensureAttachedTab(session) {
     )
     // Visible pointer for every page this tab loads, plus the current one. Injected scripts only run with Page enabled.
     await chrome.debugger.sendCommand({ tabId }, "Page.enable")
+    // Never let a page open the OS file picker from a background tab; uploads go through DOM.setFileInputFiles
+    await chrome.debugger.sendCommand(
+      { tabId },
+      "Page.setInterceptFileChooserDialog",
+      { enabled: true },
+    )
     await chrome.debugger.sendCommand(
       { tabId },
       "Page.addScriptToEvaluateOnNewDocument",

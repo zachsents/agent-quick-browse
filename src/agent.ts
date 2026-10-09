@@ -12,6 +12,8 @@ const ACTIONS = {
   click:
     "Click the numbered element that best advances the goal (link, button, tab, checkbox, result, etc.).",
   type: "Type one of the provided facts into a numbered text field / search box, or pick an option in a numbered dropdown. Only if that field doesn't already hold the right value.",
+  upload:
+    "Attach one of the provided files using the numbered file upload field, upload button, or drop zone.",
   hover:
     "Hover the mouse over the numbered element (a row, card, or menu) to reveal controls or a menu that only appear on hover.",
   press_enter:
@@ -29,6 +31,8 @@ type Action = keyof typeof ACTIONS
 type Context = {
   goal: string
   facts: Record<string, string>
+  /** Local files the model may upload, by name → absolute path */
+  files: Record<string, string>
   model: DecisionModel
   /** Jev is text-only, so it always uses "text" */
   mode: SnapshotMode
@@ -48,7 +52,7 @@ export async function runAgent({
   ...options
 }: Omit<Context, "history"> & { maxSteps: number }) {
   const ctx: Context = { ...options, history: [] }
-  const { goal, facts, model, mode, history, log } = ctx
+  const { goal, facts, files, model, mode, history, log } = ctx
 
   for (let step = 1; step <= maxSteps; step++) {
     const started = performance.now()
@@ -62,6 +66,9 @@ export async function runAgent({
       state: {
         goal,
         ...(!R.isEmpty(facts) && { facts }),
+        ...(!R.isEmpty(files) && {
+          files_available_to_upload: Object.keys(files),
+        }),
         url,
         title,
         step: `${step} of ${maxSteps}`,
@@ -83,7 +90,7 @@ export async function runAgent({
           target: {
             type: "choice",
             instructions:
-              "If the next action is a click, typing, or hover, which numbered element should it act on? Pick the one that most directly advances the goal.",
+              "If the next action is a click, typing, upload, or hover, which numbered element should it act on? Pick the one that most directly advances the goal.",
             criteria: R.fromEntries(
               R.zip(R.map(elements, R.prop("id")), descriptions),
             ),
@@ -110,10 +117,10 @@ export async function runAgent({
 
     try {
       const actionStarted = performance.now()
-      await perform(action, target, ctx)
+      const note = await perform(action, target, ctx)
       const actionMs = Math.round(performance.now() - actionStarted)
       if (actionMs > 1000) log(`  (action took ${actionMs}ms)`)
-      history.push(summary)
+      history.push(typeof note === "string" ? `${summary} -> ${note}` : summary)
       if (
         history.length >= 3 &&
         history.slice(-3).every((entry) => entry === summary)
@@ -124,7 +131,7 @@ export async function runAgent({
           `Repeated "${summary}" 3 times without progress`,
         )
     } catch (error) {
-      if (error instanceof NeedsTextError)
+      if (error instanceof NeedsInputError)
         return finish("blocked", history, error.message)
       // Failed actions are fed back to Clef so it can pick something else next step
       const message =
@@ -154,10 +161,10 @@ async function finish(
 }
 
 /**
- * Clef wants to type but none of the caller's facts fits the field, so the
- * caller has to supply the text.
+ * The model wants to type or upload, but none of the caller's facts or files
+ * fits, so the caller has to supply it.
  */
-class NeedsTextError extends Error {}
+class NeedsInputError extends Error {}
 
 /**
  * Snapshots can fail when they land mid-navigation (the document is swapped out
@@ -180,7 +187,12 @@ function isAction(choice: string): choice is Action {
 }
 
 function needsTarget(action: Action) {
-  return action === "click" || action === "type" || action === "hover"
+  return (
+    action === "click" ||
+    action === "type" ||
+    action === "hover" ||
+    action === "upload"
+  )
 }
 
 async function perform(
@@ -191,9 +203,13 @@ async function perform(
   switch (action) {
     case "click":
       if (!target) throw new Error("no element to click")
-      // Clicking a native <select> opens a browser popup CDP can't operate, so pick the option directly
+      // Clicking a native <select> or file input opens a browser/OS popup CDP can't operate, so act on it directly
       if (target.tag === "select") return selectFromDropdown(target, ctx)
+      if (target.role === "file upload") return uploadFile(target, ctx)
       return tab.click(target.id)
+    case "upload":
+      if (!target) throw new Error("no element to upload to")
+      return uploadFile(target, ctx)
     case "type": {
       if (!target) throw new Error("no element to type into")
       if (!target.editable && target.tag !== "select") {
@@ -201,6 +217,7 @@ async function perform(
         return tab.click(target.id)
       }
       if (target.tag === "select") return selectFromDropdown(target, ctx)
+      if (target.role === "file upload") return uploadFile(target, ctx)
       const text = await chooseFact(target, ctx)
       ctx.log(`  type "${text}"`)
       return tab.fill(target.id, text)
@@ -254,14 +271,14 @@ async function chooseSelectOption(
 
 /**
  * Uses Clef to pick which of the caller's facts belongs in a text field. Throws
- * NeedsTextError when there are no facts or none fits, which ends the run as
+ * NeedsInputError when there are no facts or none fits, which ends the run as
  * blocked so the caller can type it themselves.
  */
 async function chooseFact(
   target: PageElement,
   { goal, facts, history, model }: Context,
 ) {
-  const needsText = new NeedsTextError(
+  const needsText = new NeedsInputError(
     `Needs text for ${describeElement(target)}. Pass it in facts, or type it with browser_type.`,
   )
   if (R.isEmpty(facts)) throw needsText
@@ -288,4 +305,47 @@ async function chooseFact(
   const text = answers.fact && facts[answers.fact.choice]
   if (text == null) throw needsText
   return text
+}
+
+/**
+ * Uses the decision model to pick which of the caller's files belongs in an
+ * upload field, then attaches it without opening the OS file picker. Ends the
+ * run as blocked if no provided file fits.
+ */
+async function uploadFile(
+  target: PageElement,
+  { goal, files, history, model, log }: Context,
+) {
+  const needsFile = new NeedsInputError(
+    `Needs a file for ${describeElement(target)}. Pass it in files, or attach it with browser_upload.`,
+  )
+  if (R.isEmpty(files)) throw needsFile
+  const answers = await decide({
+    model,
+    state: {
+      goal,
+      upload_field: describeElement(target),
+      previous_actions: history.slice(-5),
+    },
+    questions: {
+      file: {
+        type: "choice",
+        instructions:
+          "Which of these files should be uploaded here to achieve the goal?",
+        criteria: {
+          ...R.mapValues(
+            files,
+            (path, name) => `${name}: ${path.split("/").at(-1)}`,
+          ),
+          __none__: "None of these files belongs in this field",
+        },
+      },
+    },
+  })
+  const path = answers.file && files[answers.file.choice]
+  if (path == null) throw needsFile
+  log(`  upload "${path}"`)
+  await tab.upload(target.id, [path])
+  // The page often doesn't show the attached file (hidden input behind a button), so record it for the next step
+  return `attached ${path.split("/").at(-1)}`
 }
