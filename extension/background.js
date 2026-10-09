@@ -186,7 +186,7 @@ async function release(session, keepOpen = false) {
   for (const tabId of [meta.tabId, ...meta.others]) {
     if (!(await tabExists(tabId))) continue
     if (!keepOpen && tabId !== userTab) {
-      await chrome.tabs.remove(tabId)
+      await closeTab(tabId)
       continue
     }
     attached.delete(tabId)
@@ -338,6 +338,39 @@ const CURSOR_SCRIPT = `(() => {
 
 const attached = new Set()
 chrome.debugger.onDetach.addListener(({ tabId }) => attached.delete(tabId))
+
+/**
+ * Tabs being closed by a session, whose "Leave site?" prompt is accepted
+ * automatically.
+ */
+const closing = new Set()
+
+/**
+ * Closes a session's tab. Pages with unsaved work (e.g. a half-filled upload
+ * form) answer with a "Leave site?" prompt that would block the close forever,
+ * so it is accepted through the debugger.
+ */
+async function closeTab(tabId) {
+  closing.add(tabId)
+  try {
+    await chrome.tabs.remove(tabId)
+  } finally {
+    closing.delete(tabId)
+  }
+}
+
+chrome.debugger.onEvent.addListener(({ tabId }, method, params) => {
+  if (
+    method === "Page.javascriptDialogOpening" &&
+    params.type === "beforeunload" &&
+    closing.has(tabId)
+  )
+    background(
+      chrome.debugger.sendCommand({ tabId }, "Page.handleJavaScriptDialog", {
+        accept: true,
+      }),
+    )
+})
 
 // One in-flight tab creation per session, so concurrent first calls don't open duplicate tabs
 const creating = new Map()

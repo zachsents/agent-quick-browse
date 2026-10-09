@@ -139,9 +139,16 @@ export async function evaluateExpression(expression: string) {
   )
   if (exceptionDetails)
     throw new Error(
-      exceptionDetails.exception?.description ?? exceptionDetails.text,
+      pageErrorMessage(
+        exceptionDetails.exception?.description ?? exceptionDetails.text,
+      ),
     )
   return result.value
+}
+
+/** A page exception's message without the "Error: " prefix and the page stack. */
+function pageErrorMessage(description: string) {
+  return description.replace(/^Error: /, "").replace(/\n[\s\S]*/, "")
 }
 
 export async function info() {
@@ -250,7 +257,10 @@ async function elementCenter(id: string) {
   const moves = scrollMovesSchema.parse(
     await evaluate((targetId) => {
       const el = document.querySelector(`[data-aqb-id="${targetId}"]`)
-      if (!el) throw new Error(`element ${targetId} is gone`)
+      if (!el)
+        throw new Error(
+          `element ${targetId.slice(1)} isn't on the page anymore; look again for fresh numbers`,
+        )
       const r = el.getBoundingClientRect()
       // Visible only if it's inside the window and actually hit-testable there; elements clipped inside a scrolled
       // list hit an ancestor instead and need their container scrolled
@@ -293,7 +303,10 @@ async function elementCenter(id: string) {
   return rectSchema.parse(
     await evaluate((targetId) => {
       const el = document.querySelector(`[data-aqb-id="${targetId}"]`)
-      if (!el) throw new Error(`element ${targetId} is gone`)
+      if (!el)
+        throw new Error(
+          `element ${targetId.slice(1)} isn't on the page anymore; look again for fresh numbers`,
+        )
       const centers = [...el.getClientRects(), el.getBoundingClientRect()]
         .filter((r) => r.width > 0 && r.height > 0)
         .map((r) => ({ x: r.left + r.width / 2, y: r.top + r.height / 2 }))
@@ -439,36 +452,39 @@ export async function click(id: string) {
 }
 
 /**
- * Replaces a field's contents with `text`, then reads it back and throws if it
- * didn't stick. Selecting and clearing go through Chrome's own editing commands
- * (what Cmd+A and Delete do), which rich-text editors like TikTok's description
- * box respect, unlike selecting from a page script. The text is inserted in one
- * go by default; `keystrokes` types it character by character with real key
- * events instead, for editors that only react to typing (hashtag or mention
- * pickers, editors that drop pasted text).
+ * Replaces a field's contents with `text` (or adds it at the end with
+ * `append`), then reads it back and throws if it didn't stick. Selecting and
+ * clearing go through Chrome's own editing commands (what Cmd+A and Delete do),
+ * which rich-text editors like TikTok's description box respect, unlike
+ * selecting from a page script. The text is inserted in one go by default;
+ * `keystrokes` types it character by character with real key events instead,
+ * for editors that only react to typing (hashtag or mention pickers, editors
+ * that drop pasted text), pressing Enter for each newline. Multi-line editors
+ * are blurred afterwards so suggestion popups close; single-line inputs stay
+ * focused.
  */
 export async function fill(
   id: string,
   text: string,
-  { keystrokes = false } = {},
+  { keystrokes = false, append = false } = {},
 ) {
   await click(id)
-  await pressKey({ key: "a", code: "KeyA", windowsVirtualKeyCode: 65 }, [
-    "selectAll",
-  ])
-  await pressKey(
-    { key: "Backspace", code: "Backspace", windowsVirtualKeyCode: 8 },
-    ["deleteBackward"],
-  )
+  if (append)
+    await pressKey({ key: "End", code: "End", windowsVirtualKeyCode: 35 }, [
+      "moveToEndOfDocument",
+    ])
+  else {
+    await pressKey({ key: "a", code: "KeyA", windowsVirtualKeyCode: 65 }, [
+      "selectAll",
+    ])
+    await pressKey(
+      { key: "Backspace", code: "Backspace", windowsVirtualKeyCode: 8 },
+      ["deleteBackward"],
+    )
+  }
   if (keystrokes)
     for (const char of text) {
-      await cdp("Input.dispatchKeyEvent", {
-        type: "keyDown",
-        key: char,
-        text: char,
-        unmodifiedText: char,
-      })
-      await cdp("Input.dispatchKeyEvent", { type: "keyUp", key: char })
+      await typeChar(char)
       await Bun.sleep(15)
     }
   else await cdp("Input.insertText", { text })
@@ -484,15 +500,41 @@ export async function fill(
           (focused instanceof HTMLElement && focused.isContentEditable))
           ? focused
           : document.querySelector(`[data-aqb-id="${targetId}"]`)
-      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)
-        return el.value
-      return el instanceof HTMLElement ? el.innerText : ""
+      const value =
+        el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement
+          ? el.value
+          : el instanceof HTMLElement
+            ? el.innerText
+            : ""
+      // Leave multi-line editors (captions, comments) so their mention/hashtag suggestion popups close and later
+      // clicks can't land in them. Single-line inputs keep focus for Enter or picking an autocomplete option.
+      if (!(el instanceof HTMLInputElement) && el instanceof HTMLElement)
+        el.blur()
+      return value
     }, id),
   )
-  if (normalize(value) !== normalize(text))
+  if (
+    append
+      ? !normalize(value).endsWith(normalize(text))
+      : normalize(value) !== normalize(text)
+  )
     throw new Error(
       `the field didn't end up with the text; it now reads "${value.slice(0, 120)}"${keystrokes ? "" : " (try keystrokes typing)"}`,
     )
+}
+
+/**
+ * Types one character with real key events. A newline is an Enter press, which
+ * editors turn into a line or paragraph break (a bare "\n" key event inserts
+ * nothing).
+ */
+async function typeChar(char: string) {
+  const key =
+    char === "\n"
+      ? { key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, text: "\r" }
+      : { key: char, text: char, unmodifiedText: char }
+  await cdp("Input.dispatchKeyEvent", { type: "keyDown", ...key })
+  await cdp("Input.dispatchKeyEvent", { type: "keyUp", key: key.key })
 }
 
 /**
@@ -525,12 +567,20 @@ async function pressKey(
  */
 export async function upload(id: string, paths: string[]) {
   const { result } = z
-    .object({ result: z.object({ objectId: z.string().optional() }) })
+    .object({
+      result: z.object({
+        objectId: z.string().optional(),
+        subtype: z.string().optional(),
+        description: z.string().optional(),
+      }),
+    })
     .parse(
       await cdp("Runtime.evaluate", {
         expression: `(${findFileInput.toString()})(${JSON.stringify(id)})`,
       }),
     )
+  if (result.subtype === "error")
+    throw new Error(pageErrorMessage(String(result.description)))
   if (!result.objectId)
     throw new Error("no file input found behind this element")
   // Re-attaching restarts the upload on many sites, so skip files that are already attached
@@ -559,7 +609,10 @@ export async function upload(id: string, paths: string[]) {
  */
 function findFileInput(targetId: string) {
   const el = document.querySelector(`[data-aqb-id="${targetId}"]`)
-  if (!el) throw new Error(`element ${targetId} is gone`)
+  if (!el)
+    throw new Error(
+      `element ${targetId.slice(1)} isn't on the page anymore; look again for fresh numbers`,
+    )
   if (el.matches("input[type=file]")) return el
   if (el instanceof HTMLLabelElement && el.control?.matches("input[type=file]"))
     return el.control
@@ -608,9 +661,92 @@ export async function selectOptions(id: string) {
 }
 
 export async function pressEnter() {
-  const key = { key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 }
-  await cdp("Input.dispatchKeyEvent", { type: "keyDown", ...key, text: "\r" })
-  await cdp("Input.dispatchKeyEvent", { type: "keyUp", ...key })
+  await key("Enter")
+}
+
+/**
+ * Virtual key codes for named keys `key` accepts (letters and digits are
+ * derived).
+ */
+const NAMED_KEYS: Record<string, number> = {
+  Escape: 27,
+  Enter: 13,
+  Tab: 9,
+  Backspace: 8,
+  Delete: 46,
+  Space: 32,
+  ArrowUp: 38,
+  ArrowDown: 40,
+  ArrowLeft: 37,
+  ArrowRight: 39,
+  Home: 36,
+  End: 35,
+  PageUp: 33,
+  PageDown: 34,
+}
+
+/**
+ * Editing commands Chrome runs for platform shortcuts, so Cmd/Ctrl+A etc.
+ * behave the same on every OS.
+ */
+const SHORTCUT_COMMANDS: Record<string, string> = {
+  a: "selectAll",
+  c: "copy",
+  x: "cut",
+  v: "paste",
+  z: "undo",
+}
+
+/**
+ * Presses a key or combo in the session's tab, e.g. "Escape", "Enter", "Tab",
+ * "ArrowDown", "Cmd+A", "Shift+Tab". Modifiers: Cmd/Meta, Ctrl, Alt/Option,
+ * Shift.
+ */
+export async function key(combo: string) {
+  const parts = combo.split("+").map((part) => part.trim())
+  const name = parts.at(-1) ?? ""
+  const mods = new Set(parts.slice(0, -1).map((mod) => mod.toLowerCase()))
+  const modifiers =
+    (mods.has("alt") || mods.has("option") ? 1 : 0) |
+    (mods.has("ctrl") || mods.has("control") ? 2 : 0) |
+    (mods.has("cmd") || mods.has("meta") || mods.has("command") ? 4 : 0) |
+    (mods.has("shift") ? 8 : 0)
+  const named = Object.keys(NAMED_KEYS).find(
+    (k) => k.toLowerCase() === name.toLowerCase(),
+  )
+  if (!named && name.length !== 1)
+    throw new Error(
+      `unknown key "${name}" (use e.g. Escape, Enter, Tab, ArrowDown, a, Cmd+A)`,
+    )
+  const char = named
+    ? named === "Space"
+      ? " "
+      : named === "Enter"
+        ? "\r"
+        : ""
+    : name
+  const event = named
+    ? {
+        key: named === "Space" ? " " : named,
+        code: named,
+        windowsVirtualKeyCode: NAMED_KEYS[named],
+      }
+    : {
+        key: char,
+        code: /\d/.test(char) ? `Digit${char}` : `Key${char.toUpperCase()}`,
+        windowsVirtualKeyCode: char.toUpperCase().charCodeAt(0),
+      }
+  const command =
+    modifiers & 6 ? SHORTCUT_COMMANDS[char.toLowerCase()] : undefined
+  const typesText = char && !(modifiers & 6)
+  await cdp("Input.dispatchKeyEvent", {
+    type: typesText ? "keyDown" : "rawKeyDown",
+    ...event,
+    modifiers,
+    ...(typesText && { text: char }),
+    ...(command && { commands: [command] }),
+  })
+  await cdp("Input.dispatchKeyEvent", { type: "keyUp", ...event, modifiers })
 }
 
 /**

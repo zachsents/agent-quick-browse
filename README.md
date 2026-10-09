@@ -87,9 +87,19 @@ bunx agent-quick-browse run "search for Cloudflare and open its article" --url h
 bunx agent-quick-browse run "upload my resume" --url https://example.com/apply --file resume=/path/to/resume.pdf
 bunx agent-quick-browse run "open my orders" --url https://amazon.com --model luna   # GPT-6 Luna Decisions (add --vision for screenshots)
 bunx agent-quick-browse look --text     # what the model sees
-bunx agent-quick-browse mcp       # MCP server: browser_run, browser_look, browser_click, browser_type, browser_hover, browser_upload, browser_tabs, browser_attach, browser_release, …
+bunx agent-quick-browse mcp       # MCP server: browser_run, browser_look, browser_click, browser_type, browser_key, browser_upload, browser_tabs, browser_attach, browser_release, …
+```
+
+Exact steps without a model, using the numbers from the latest `look --text`:
+
+```sh
+aqb click 12
+aqb type 15 "Caption #chess #fyp" --keystrokes   # replaces the text and verifies it; add --submit to press Enter
+aqb key Escape                                   # also Enter, Tab, ArrowDown, Cmd+A, Shift+Tab, …
+aqb upload 16 ./video.mp4
+aqb scroll down; aqb navigate <url>; aqb back; aqb text
 ```
 
 For the short `aqb` command, install globally: `bun add -g agent-quick-browse`.
 
-Each `--session` (or MCP session) gets its own background tab, in a tab group you name with `--group` (default "Clef"); omit `--url` to continue where it left off. Take over a tab you already have open with `tabs` + `attach <tabId>`. `release` ends a session: tabs it opened close (`--keep` leaves them open, ungrouped), and taken-over tabs are handed back to their original group. MCP servers release their sessions automatically when the agent disconnects.
+Each `--session` (or MCP session) gets its own background tab, in a tab group you name with `--group` (default "AQB"); omit `--url` to continue where it left off. Take over a tab you already have open with `tabs` + `attach <tabId>`. `release` ends a session: tabs it opened close (`--keep` leaves them open, ungrouped), and taken-over tabs are handed back to their original group. MCP servers release their sessions automatically when the agent disconnects.

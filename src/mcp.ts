@@ -96,7 +96,7 @@ Ask the user before anything that purchases, sends, posts, deletes, or submits.`
           .boolean()
           .optional()
           .describe(
-            "Type text with real per-character key events instead of inserting it in one go. Slower; use it when a rich-text editor mangles or drops inserted text, or only reacts to typing (hashtag/mention pickers).",
+            "Type text with real per-character key events instead of inserting it in one go. Slower; use it when a rich-text editor mangles or drops inserted text, or only reacts to typing (hashtag/mention pickers). Newlines are typed as Enter.",
           ),
         model: z
           .enum(["clef", "clef-flash", "jev", "luna"])
@@ -219,17 +219,37 @@ Ask the user before anything that purchases, sends, posts, deletes, or submits.`
           .boolean()
           .optional()
           .describe(
-            "Type text with real per-character key events instead of inserting it in one go. Slower; use it when a rich-text editor mangles or drops inserted text, or only reacts to typing (hashtag/mention pickers).",
+            "Type text with real per-character key events instead of inserting it in one go. Slower; use it when a rich-text editor mangles or drops inserted text, or only reacts to typing (hashtag/mention pickers). Newlines are typed as Enter.",
+          ),
+        append: z
+          .boolean()
+          .optional()
+          .describe(
+            "Add the text at the end instead of replacing the contents.",
           ),
         ...sessionArg,
       },
     },
-    inSession(async ({ element, text: value, submit, keystrokes }) => {
-      await tab.fill(`e${element}`, value, { keystrokes })
+    inSession(async ({ element, text: value, submit, keystrokes, append }) => {
+      await tab.fill(`e${element}`, value, { keystrokes, append })
       if (submit) {
         await tab.pressEnter()
         await tab.waitForLoad()
       }
+      return pageInfo()
+    }),
+  )
+
+  server.registerTool(
+    "browser_key",
+    {
+      description:
+        "Press a key or shortcut on the focused element: Escape (close a popup or suggestion list), Enter, Tab, ArrowDown, Backspace, Cmd+A, Shift+Tab, or a single character.",
+      inputSchema: { key: z.string(), ...sessionArg },
+    },
+    inSession(async ({ key }) => {
+      await tab.key(key)
+      await tab.waitForLoad()
       return pageInfo()
     }),
   )

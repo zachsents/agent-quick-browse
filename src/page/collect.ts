@@ -130,10 +130,13 @@ function listContext(el: HTMLElement) {
  * the model can see an upload already happened.
  */
 function attachedFiles(el: HTMLElement) {
+  // Other form fields sit near upload inputs too but aren't the upload control
+  if (el.matches("input:not([type=file]), textarea, [contenteditable]"))
+    return ""
   let input: Element | null = el.matches("input[type=file]") ? el : null
   for (
     let scope: Element | null = el, depth = 0;
-    !input && scope && depth < 3;
+    !input && scope && scope !== document.body && depth < 3;
     scope = scope.parentElement, depth++
   )
     input = scope.querySelector("input[type=file]")
@@ -142,6 +145,23 @@ function attachedFiles(el: HTMLElement) {
       ? [...(input.files ?? [])].map((file) => file.name)
       : []
   return names.length ? `attached: ${names.join(", ")}` : ""
+}
+
+/**
+ * Short text of the closest small container around an element (up to 5 levels
+ * up, since switches nest their input deep in wrappers), for controls with no
+ * text.
+ */
+function nearbyLabel(el: HTMLElement) {
+  for (
+    let parent = el.parentElement, depth = 0;
+    parent && depth < 5;
+    parent = parent.parentElement, depth++
+  ) {
+    const text = clean(parent.innerText)
+    if (text) return text.length <= 80 ? text : ""
+  }
+  return ""
 }
 
 /** ARIA role, falling back to the implicit role of native elements. */
@@ -282,6 +302,8 @@ export function collect({
         ...new Set(
           [
             ...parts.filter(Boolean),
+            // Unlabeled controls (e.g. a switch div next to its "AI-generated content" text) borrow the nearby label
+            parts.some(Boolean) ? "" : nearbyLabel(el),
             ...states,
             listContext(el),
             attachedFiles(el),
@@ -395,14 +417,17 @@ export function collect({
         )
       )
         continue
+      // Numbered elements are listed even when aria-hidden (e.g. TikTok's switch inputs); they passed the visibility
+      // and hit tests already
+      const id = child.getAttribute("data-aqb-id")
       if (
-        child.getAttribute("aria-hidden") === "true" ||
-        !child.checkVisibility({ visibilityProperty: true })
+        !id &&
+        (child.getAttribute("aria-hidden") === "true" ||
+          !child.checkVisibility({ visibilityProperty: true }))
       )
         continue
 
       const indent = "  ".repeat(depth)
-      const id = child.getAttribute("data-aqb-id")
       if (id) {
         // Inline with surrounding text so a row like `1. [13] link "Title" (example.com) 42 points` stays together.
         // Numbered controls nested inside (e.g. a row's hover-only buttons) follow it, since the row's subtree is skipped.

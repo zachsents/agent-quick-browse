@@ -24,6 +24,10 @@ const USAGE = `aqb (agent-quick-browse) — drive your own Chrome with a decisio
 Usage:
   aqb run "<goal>" [--url <url>] [--fact key=value ...] [--file name=path ...] [--model jev|luna|clef|clef-flash] [--text|--vision] [--keystrokes] [--max-steps 25]
   aqb look [--url <url>] [--text]  Print numbered elements + annotated screenshot (or the text outline)
+  aqb click <n>               Click element n from the latest look      aqb hover <n>
+  aqb type <n> "<text>" [--keystrokes] [--append] [--submit]   Replace (or append to) field n's text, verified
+  aqb key <combo>            Press a key: Escape, Enter, Tab, ArrowDown, Cmd+A, Shift+Tab, …
+  aqb scroll <up|down>       aqb upload <n> <path...>   aqb navigate <url>   aqb back   aqb text (page text)
   aqb tabs                   List open Chrome tabs (id, group, controlling session)
   aqb attach <tabId>         Take over an already-open tab for the session
   aqb release [--keep]       End the session: close its tabs (--keep: hand them back ungrouped);
@@ -55,6 +59,8 @@ const { values, positionals } = parseArgs({
     vision: { type: "boolean", default: false },
     "max-steps": { type: "string", default: "25" },
     keystrokes: { type: "boolean", default: false },
+    submit: { type: "boolean", default: false },
+    append: { type: "boolean", default: false },
     "save-keys": { type: "boolean", default: false },
     session: { type: "string", default: "default" },
     group: { type: "string" },
@@ -64,6 +70,12 @@ const { values, positionals } = parseArgs({
 })
 
 loadKeyFile()
+
+// Agents read the output: print failures as one line instead of a stack trace
+process.on("uncaughtException", (error) => {
+  console.error(`error: ${error.message}`)
+  process.exit(1)
+})
 
 const [command, ...rest] = positionals
 
@@ -90,11 +102,37 @@ switch (command) {
   case "release":
     await inSession(() => tab.release(values.keep))
     break
-  case "tabs":
-    for (const t of await tab.listTabs())
+  case "tabs": {
+    const tabs = await tab.listTabs()
+    // Agent groups: the default plus any group a live session uses. Tabs there with no session lost their session
+    // (e.g. the extension was removed and re-added) and can be taken back with `aqb attach <id>`.
+    const agentGroups = new Set([
+      "AQB",
+      "Clef",
+      ...tabs.flatMap((t) => (t.session && t.group ? [t.group] : [])),
+    ])
+    for (const t of tabs) {
+      const owner = t.session
+        ? `  (session: ${t.session})`
+        : t.group && agentGroups.has(t.group)
+          ? "  (orphaned agent tab: no session; `aqb attach` it)"
+          : ""
       console.log(
-        `${String(t.tabId).padEnd(11)} ${t.active ? "*" : " "} ${(t.group ? `[${t.group}] ` : "") + t.title.slice(0, 60)}${t.session ? `  (session: ${t.session})` : ""}\n            ${t.url.slice(0, 100)}`,
+        `${String(t.tabId).padEnd(11)} ${t.active ? "*" : " "} ${(t.group ? `[${t.group}] ` : "") + t.title.slice(0, 60)}${owner}\n            ${t.url.slice(0, 100)}`,
       )
+    }
+    break
+  }
+  case "click":
+  case "hover":
+  case "type":
+  case "upload":
+  case "key":
+  case "scroll":
+  case "navigate":
+  case "back":
+  case "text":
+    await inSession(() => act(command, rest))
     break
   case "attach": {
     const tabId = Number(rest[0])
@@ -275,4 +313,75 @@ function saveKeys() {
   )
   chmodSync(file, 0o600)
   return `Saved ${found.join(", ")} to ${file}.\n\n`
+}
+
+/** Element id for a number from the latest `aqb look`. */
+function elementArg(raw: string | undefined) {
+  const n = Number(raw)
+  if (!Number.isInteger(n) || n < 1)
+    throw new Error("expected an element number from `aqb look`")
+  return `e${n}`
+}
+
+/**
+ * Runs one exact action (no model) on the session's tab, then prints where the
+ * tab is.
+ */
+async function act(command: string, args: string[]) {
+  switch (command) {
+    case "click":
+      await tab.click(elementArg(args[0]))
+      break
+    case "hover":
+      await tab.hover(elementArg(args[0]))
+      break
+    case "type":
+      if (args[1] == null)
+        throw new Error(
+          'usage: aqb type <n> "<text>" [--keystrokes] [--append] [--submit]',
+        )
+      await tab.fill(elementArg(args[0]), args.slice(1).join(" "), {
+        keystrokes: values.keystrokes,
+        append: values.append,
+      })
+      if (values.submit) await tab.pressEnter()
+      break
+    case "upload": {
+      const paths = args.slice(1).map((path) => resolve(path))
+      const missing = paths.find((path) => !existsSync(path))
+      if (!paths.length || missing)
+        throw new Error(
+          missing
+            ? `${missing} does not exist`
+            : "usage: aqb upload <n> <path...>",
+        )
+      console.log(await tab.upload(elementArg(args[0]), paths))
+      break
+    }
+    case "key":
+      if (!args[0]) throw new Error("usage: aqb key <Escape|Enter|Tab|Cmd+A|…>")
+      await tab.key(args[0])
+      break
+    case "scroll":
+      await tab.scroll(args[0] === "up" ? -1 : 1)
+      break
+    case "navigate":
+      if (!args[0]) throw new Error("usage: aqb navigate <url>")
+      await tab.goto(args[0])
+      break
+    case "back":
+      await tab.goBack()
+      break
+    case "text": {
+      const [{ url, title }, body] = await Promise.all([
+        tab.info(),
+        tab.innerText(),
+      ])
+      console.log(`${title} — ${url}\n\n${body}`)
+      return
+    }
+  }
+  await tab.waitForLoad()
+  const { url, title } = await tab.info()
+  console.log(`Now on: ${title} — ${url}`)
 }

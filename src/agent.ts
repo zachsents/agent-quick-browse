@@ -16,6 +16,8 @@ const ACTIONS = {
     "Attach one of the provided files using the numbered file upload field, upload button, or drop zone.",
   hover:
     "Hover the mouse over the numbered element (a row, card, or menu) to reveal controls or a menu that only appear on hover.",
+  press_escape:
+    "Press Escape to close a popup, suggestion list, menu, or dialog that is in the way (do not click buttons to dismiss it).",
   press_enter:
     "Press Enter to submit text that was just typed (e.g. a search box with no visible submit button).",
   scroll_down: "Scroll down because what is needed is not visible yet.",
@@ -285,6 +287,8 @@ async function perform(
       return tab.hover(target.id)
     case "press_enter":
       return tab.pressEnter()
+    case "press_escape":
+      return tab.key("Escape")
     case "scroll_down":
       return tab.scroll(1)
     case "scroll_up":
@@ -340,6 +344,9 @@ async function chooseFact(
     `Needs text for ${describeElement(target)}. Pass it in facts, or type it with browser_type.`,
   )
   if (R.isEmpty(facts)) throw needsText
+  // With a single fact there's nothing to choose; asking the model only risks a wrong "none of these fits"
+  const only = Object.values(facts)
+  if (only.length === 1 && only[0] != null) return only[0]
 
   const answers = await decide({
     model,
