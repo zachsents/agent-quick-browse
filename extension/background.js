@@ -9,6 +9,20 @@ const DEFAULT_GROUP = "AQB"
 const NO_GROUP = chrome.tabGroups.TAB_GROUP_ID_NONE
 let port = null
 
+/**
+ * Runs best-effort background work (startup cleanup, alarms, tab grouping)
+ * without leaving an unhandled rejection. While the extension reloads or its
+ * service worker is torn down, Chrome rejects in-flight API calls with "No SW";
+ * that's expected then, and anything else is logged as a warning instead of an
+ * uncaught error.
+ */
+function background(promise) {
+  promise.catch((error) => {
+    if (!String(error?.message ?? error).includes("No SW"))
+      console.warn("aqb background task failed:", error)
+  })
+}
+
 function connect() {
   if (port) return
   port = chrome.runtime.connectNative(HOST)
@@ -20,9 +34,9 @@ function connect() {
 }
 
 connect()
-void pruneSessions()
+background(pruneSessions())
 // Safety net in case the worker was restarted without a live port
-chrome.alarms.create("reconnect", { periodInMinutes: 1 })
+background(chrome.alarms.create("reconnect", { periodInMinutes: 1 }))
 chrome.alarms.onAlarm.addListener(connect)
 
 async function onMessage({ id, method, params }) {
@@ -93,7 +107,7 @@ const handlers = {
       others: [],
     }
     await setSession(session, meta)
-    void groupTab(tabId, meta.group)
+    background(groupTab(tabId, meta.group))
     await ensureAttachedTab(session, group)
     return { url: tab.url ?? "", title: tab.title ?? "" }
   },
@@ -351,7 +365,7 @@ async function ensureAttachedTab(session, group) {
             others: [],
           }
           await setSession(session, created)
-          void groupTab(tab.id, created.group)
+          background(groupTab(tab.id, created.group))
           return created
         })().finally(() => creating.delete(session)),
       )
@@ -360,7 +374,7 @@ async function ensureAttachedTab(session, group) {
   } else if (group && group !== meta.group) {
     meta = { ...meta, group }
     await setSession(session, meta)
-    void groupTab(meta.tabId, group)
+    background(groupTab(meta.tabId, group))
   }
   const { tabId } = meta
   if (!attached.has(tabId)) {
@@ -394,7 +408,9 @@ async function ensureAttachedTab(session, group) {
 
 // A link that opens a new tab from a session's tab hands the session to the new tab (same group). The previous tab is
 // remembered so release() cleans it up too.
-chrome.tabs.onCreated.addListener(async (tab) => {
+chrome.tabs.onCreated.addListener((tab) => background(handOffToNewTab(tab)))
+
+async function handOffToNewTab(tab) {
   if (tab.openerTabId == null) return
   const sessions = await getSessions()
   const session = Object.keys(sessions).find(
@@ -410,5 +426,5 @@ chrome.tabs.onCreated.addListener(async (tab) => {
     // A taken-over tab keeps its original group on release; the new tab is the agent's own
     ...(meta.adopted && { handBack: meta.tabId }),
   })
-  void groupTab(tab.id, meta.group)
-})
+  background(groupTab(tab.id, meta.group))
+}
