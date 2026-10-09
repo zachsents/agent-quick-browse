@@ -61,8 +61,9 @@ export async function decide({
   images?: string[]
 }) {
   if (model === "jev") {
-    const json = await gateway("evaluate", {
-      model: "typesafe-ai/jev",
+    const { url, key, model: jevModel } = jevEndpoint()
+    const json = await post(url, key, {
+      model: jevModel,
       state,
       questions,
     })
@@ -70,8 +71,9 @@ export async function decide({
   }
 
   if (model === "luna") {
-    const json = await gateway("decisions", {
-      model: "openai/gpt-6-luna-decisions",
+    const { url, key, model: lunaModel } = lunaEndpoint()
+    const json = await post(url, key, {
+      model: lunaModel,
       input: [
         {
           role: "user",
@@ -142,22 +144,94 @@ export async function decide({
 }
 
 /**
- * POSTs to a Vercel AI Gateway decision endpoint ("evaluate" for the System One
- * format, "decisions" for OpenAI's).
+ * Where Jev requests go: Vercel AI Gateway if AI_GATEWAY_API_KEY is set (one
+ * key for Jev and Luna), otherwise TypeSafe directly with TYPESAFE_API_KEY.
+ * Both take the same System One request shape. JEV_MODEL overrides the direct
+ * model id.
  */
-async function gateway(endpoint: "evaluate" | "decisions", body: object) {
-  const { AI_GATEWAY_API_KEY } = z
-    .object({ AI_GATEWAY_API_KEY: z.string().min(1) })
-    .parse(process.env)
-  const res = await fetch(`https://ai-gateway.vercel.sh/v1/${endpoint}`, {
+function jevEndpoint() {
+  const { AI_GATEWAY_API_KEY, TYPESAFE_API_KEY, JEV_MODEL } = process.env
+  if (AI_GATEWAY_API_KEY)
+    return {
+      url: "https://ai-gateway.vercel.sh/v1/evaluate",
+      key: AI_GATEWAY_API_KEY,
+      model: "typesafe-ai/jev",
+    }
+  if (TYPESAFE_API_KEY)
+    return {
+      url: "https://api.typesafe.ai/v1/systemone",
+      key: TYPESAFE_API_KEY,
+      model: JEV_MODEL ?? "jev-latest",
+    }
+  throw new Error(
+    "Jev needs an API key: set AI_GATEWAY_API_KEY (Vercel AI Gateway) or TYPESAFE_API_KEY (TypeSafe)",
+  )
+}
+
+/**
+ * Where GPT-6 Luna Decisions requests go: Vercel AI Gateway if
+ * AI_GATEWAY_API_KEY is set, otherwise OpenAI directly with OPENAI_API_KEY.
+ * Both take the same OpenAI Decisions request shape.
+ */
+function lunaEndpoint() {
+  const { AI_GATEWAY_API_KEY, OPENAI_API_KEY } = process.env
+  if (AI_GATEWAY_API_KEY)
+    return {
+      url: "https://ai-gateway.vercel.sh/v1/decisions",
+      key: AI_GATEWAY_API_KEY,
+      model: "openai/gpt-6-luna-decisions",
+    }
+  if (OPENAI_API_KEY)
+    return {
+      url: "https://api.openai.com/v1/decisions",
+      key: OPENAI_API_KEY,
+      model: "gpt-6-luna",
+    }
+  throw new Error(
+    "GPT-6 Luna needs an API key: set AI_GATEWAY_API_KEY (Vercel AI Gateway) or OPENAI_API_KEY (OpenAI)",
+  )
+}
+
+async function post(url: string, key: string, body: object) {
+  const res = await fetch(url, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${AI_GATEWAY_API_KEY}`,
+      Authorization: `Bearer ${key}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify(body),
   })
   if (!res.ok)
-    throw new Error(`AI Gateway ${endpoint} ${res.status}: ${await res.text()}`)
+    throw new Error(`${new URL(url).host} ${res.status}: ${await res.text()}`)
   return res.json()
+}
+
+/**
+ * The model to use when none is specified, based on which keys are set: Jev
+ * (best in benchmarks) via the gateway or TypeSafe, else GPT-6 Luna via OpenAI,
+ * else Clef via Cloudflare. Throws a setup hint if no key is set.
+ */
+export function defaultModel(): DecisionModel {
+  const {
+    AI_GATEWAY_API_KEY,
+    TYPESAFE_API_KEY,
+    OPENAI_API_KEY,
+    CLOUDFLARE_AI_API_TOKEN,
+  } = process.env
+  if (AI_GATEWAY_API_KEY || TYPESAFE_API_KEY) return "jev"
+  if (OPENAI_API_KEY) return "luna"
+  if (CLOUDFLARE_AI_API_TOKEN) return "clef"
+  throw new Error(
+    "No decision model key found. Set AI_GATEWAY_API_KEY (Jev + GPT-6 Luna), TYPESAFE_API_KEY (Jev), OPENAI_API_KEY (GPT-6 Luna), or CLOUDFLARE_AI_ACCOUNT_ID + CLOUDFLARE_AI_API_TOKEN (Clef).",
+  )
+}
+
+/**
+ * How the page is shown to the model: Jev only reads text; otherwise an
+ * explicit choice wins, and the default is each model's better mode in
+ * benchmarks (text for Luna, screenshots for Clef).
+ */
+export function resolveMode(model: DecisionModel, view?: "text" | "vision") {
+  if (model === "jev") return "text"
+  return view ?? (model === "luna" ? "text" : "vision")
 }

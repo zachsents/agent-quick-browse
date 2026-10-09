@@ -2,20 +2,74 @@ import { AsyncLocalStorage } from "node:async_hooks"
 import { z } from "zod"
 import { SOCKET_PATH } from "./paths.ts"
 
-const sessionStore = new AsyncLocalStorage<string>()
+const sessionStore = new AsyncLocalStorage<{
+  session: string
+  group?: string
+}>()
 
-/**
- * Runs `fn` against the named session's agent tab. Each session has its own
- * background tab, so sessions can run in parallel. Calls outside withSession
- * use the "default" session.
- */
-export function withSession<T>(session: string, fn: () => Promise<T>) {
-  return sessionStore.run(session, fn)
+/** The current session's name ("default" outside withSession). */
+function currentSession() {
+  return sessionStore.getStore()?.session ?? "default"
 }
 
-/** Closes the session's agent tab. */
+/**
+ * Runs `fn` against the named session's tab. Each session has its own tab, so
+ * sessions can run in parallel. `group` names the tab group the session's tab
+ * goes in (default "Clef"); sessions with the same group share it.
+ */
+export function withSession<T>(
+  session: string,
+  fn: () => Promise<T>,
+  options: { group?: string } = {},
+) {
+  return sessionStore.run({ session, ...options }, fn)
+}
+
+/**
+ * Closes the session's tabs (a tab taken over with `adopt` is still handed
+ * back, never closed).
+ */
 export async function close() {
   await rpc("close")
+}
+
+/**
+ * Ends the session. Tabs it opened close unless `keepOpen`; a tab it took over
+ * (or any tab, with `keepOpen`) is handed back: debugger detached and removed
+ * from the agent's group, back into its original group if it had one.
+ */
+export async function release(keepOpen?: boolean) {
+  await rpc("release", { keepOpen })
+}
+
+const tabListSchema = z.array(
+  z.object({
+    tabId: z.number(),
+    title: z.string(),
+    url: z.string(),
+    active: z.boolean(),
+    windowId: z.number(),
+    group: z.string().nullable(),
+    session: z.string().nullable(),
+  }),
+)
+
+/**
+ * Every open tab in Chrome, with its group and the session controlling it (if
+ * any).
+ */
+export async function listTabs() {
+  return tabListSchema.parse(await rpc("tabs"))
+}
+
+/**
+ * Makes an already-open tab this session's tab. Releasing the session hands it
+ * back.
+ */
+export async function adopt(tabId: number) {
+  return z
+    .object({ url: z.string(), title: z.string() })
+    .parse(await rpc("adopt", { tabId }))
 }
 
 const rpcResponseSchema = z.object({
@@ -34,7 +88,7 @@ const evaluateResultSchema = z.object({
 const rectSchema = z.object({ x: z.number(), y: z.number() })
 
 async function rpc(
-  method: "cdp" | "tab" | "close" | "sequence",
+  method: "cdp" | "tab" | "close" | "release" | "tabs" | "adopt",
   params?: object,
 ) {
   const res = await fetch("http://localhost/rpc", {
@@ -42,7 +96,11 @@ async function rpc(
     method: "POST",
     body: JSON.stringify({
       method,
-      params: { ...params, session: sessionStore.getStore() ?? "default" },
+      params: {
+        ...params,
+        ...sessionStore.getStore(),
+        session: currentSession(),
+      },
     }),
   }).catch(() => {
     throw new Error(
@@ -284,9 +342,12 @@ const pointers = new Map<string, { x: number; y: number }>()
  * elements along the path get real hover, mouseenter, and mouseleave events.
  */
 async function movePointer(x: number, y: number) {
-  const session = sessionStore.getStore() ?? "default"
+  const session = currentSession()
   const from = pointers.get(session) ?? { x, y }
   const duration = Math.min(500, 100 + Math.hypot(x - from.x, y - from.y) * 0.4)
+  await showOrb(
+    `glide(${JSON.stringify(from)}, ${JSON.stringify({ x, y })}, ${duration})`,
+  )
   await playFrames(duration, (eased) => ({
     method: "Input.dispatchMouseEvent",
     params: {
@@ -296,6 +357,15 @@ async function movePointer(x: number, y: number) {
     },
   }))
   pointers.set(session, { x, y })
+}
+
+/**
+ * Animates the visible pointer orb the extension injects (`window.__clefOrb`).
+ * It's driven explicitly rather than by mouse events so the user's own mouse
+ * never makes it appear. A no-op on pages without it.
+ */
+async function showOrb(call: string) {
+  await cdp("Runtime.evaluate", { expression: `window.__clefOrb?.${call}` })
 }
 
 /** Ease-in-out curve for animations, t in [0, 1]. */
@@ -343,6 +413,7 @@ export async function hover(id: string) {
 export async function click(id: string) {
   const { x, y } = await elementCenter(id)
   await movePointer(x, y)
+  await showOrb(`click(${JSON.stringify({ x, y })})`)
   await cdp("Input.dispatchMouseEvent", {
     type: "mousePressed",
     x,
@@ -462,7 +533,7 @@ export async function scroll(direction: 1 | -1) {
   const viewport = z
     .object({ width: z.number(), height: z.number() })
     .parse(await evaluate(() => ({ width: innerWidth, height: innerHeight })))
-  const session = sessionStore.getStore() ?? "default"
+  const session = currentSession()
   const center = { x: viewport.width / 2, y: viewport.height / 2 }
   const pointer = pointers.get(session) ?? center
   // Like a person, move the mouse over the content first if nothing under it can scroll

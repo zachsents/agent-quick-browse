@@ -8,9 +8,9 @@ Fast, cheap browser actions for agents. A decision model — TypeSafe's Jev, Ope
 
 ## Recommended setup
 
-- **Model: Jev, text mode (the default).** Fastest at every benchmark level and the most reliable (17–19 of 21 ceiling levels, vs 15 for GPT-6 Luna text and 10–18 for the vision configs). No flags needed.
-- **If Jev gets stuck exploring** (e.g. hunting for something across pages), retry that sub-goal with `--model luna --text`.
-- **Vision (`--model luna` or `clef`) only when meaning is in pixels** — unlabeled icons, canvases, charts. It's slower and less reliable on normal pages.
+- **Model: Jev, text mode (the default when you have a gateway or TypeSafe key).** Fastest at every benchmark level and the most reliable (17–19 of 21 ceiling levels, vs 15 for GPT-6 Luna text and 10–18 for the vision configs). No flags needed. With only an OpenAI key, GPT-6 Luna is picked automatically.
+- **If Jev gets stuck exploring** (e.g. hunting for something across pages), retry that sub-goal with `--model luna`.
+- **Screenshots (`--vision`, with `--model luna` or `clef`) only when meaning is in pixels** — unlabeled icons, canvases, charts. It's slower and less reliable on normal pages.
 - **Driving agent:** split tasks into sub-goals of a few explicit steps each, pass `facts` and `files`, check each result, and finish fiddly widgets (date pickers) yourself with `browser_look` + `browser_click`. That's the setup behind the 51–77% speedup below.
 
 ## Benchmarks
@@ -51,7 +51,7 @@ Sonnet times exclude ~15s of agent startup. Also passing in single-run ceiling t
 
 ## Setup
 
-Requires macOS, Google Chrome, [Bun](https://bun.sh), and a [Vercel AI Gateway](https://vercel.com/ai-gateway) key. Published on npm as [`clef-browser`](https://www.npmjs.com/package/clef-browser). Paste this to your coding agent (Claude Code, Codex, Cursor, …):
+Requires macOS, Google Chrome, [Bun](https://bun.sh), and an API key for a decision model: a [Vercel AI Gateway](https://vercel.com/ai-gateway) key (covers Jev and GPT-6 Luna), or a TypeSafe key (Jev) or OpenAI key (GPT-6 Luna) directly. Published on npm as [`clef-browser`](https://www.npmjs.com/package/clef-browser). Paste this to your coding agent (Claude Code, Codex, Cursor, …):
 
 ```text
 Set up the clef-browser MCP server (https://github.com/zachsents/clef-browser) for me:
@@ -59,8 +59,10 @@ Set up the clef-browser MCP server (https://github.com/zachsents/clef-browser) f
 1. Run: bunx clef-browser@latest setup
 2. Tell me to open chrome://extensions, turn on Developer mode, click "Load unpacked" and pick
    ~/.clef-browser/extension. Wait until I confirm.
-3. Check that AI_GATEWAY_API_KEY is exported in ~/.zprofile (login shells read that, not ~/.zshrc).
-   If it isn't, ask me to add it myself — never ask me to paste the key into chat.
+3. Check that one of these is exported in ~/.zprofile (login shells read that, not ~/.zshrc):
+   AI_GATEWAY_API_KEY (Vercel AI Gateway, covers Jev + GPT-6 Luna), TYPESAFE_API_KEY (Jev), or
+   OPENAI_API_KEY (GPT-6 Luna — then use --model luna / model "luna"). If none is, ask me to add one
+   myself — never ask me to paste a key into chat.
 4. Register the MCP server, launched through a login shell so it picks up that key. For Claude Code:
    claude mcp add -s user clef-browser -- zsh -lc "exec ~/.bun/bin/bun x clef-browser@latest mcp"
    For other agents, add an MCP server with command `zsh` and
@@ -74,16 +76,16 @@ Set up the clef-browser MCP server (https://github.com/zachsents/clef-browser) f
 7. Tell me to restart my agent session so the browser_* tools load.
 ```
 
-Optional: set `CLOUDFLARE_AI_ACCOUNT_ID` and `CLOUDFLARE_AI_API_TOKEN` (a Workers AI token) to use the Clef models. After upgrading, re-run `bunx clef-browser@latest setup` and reload the extension.
+Keys: `AI_GATEWAY_API_KEY` is used when set; otherwise `TYPESAFE_API_KEY` (Jev, default model) and `OPENAI_API_KEY` (`--model luna`) talk to the providers directly. Clef needs `CLOUDFLARE_AI_ACCOUNT_ID` + `CLOUDFLARE_AI_API_TOKEN` (a Workers AI token). After upgrading, re-run `bunx clef-browser@latest setup` and reload the extension.
 
 ## Usage
 
 ```sh
 bunx clef-browser run "search for Cloudflare and open its article" --url https://en.wikipedia.org --fact search=Cloudflare
 bunx clef-browser run "upload my resume" --url https://example.com/apply --file resume=/path/to/resume.pdf
-bunx clef-browser run "open my orders" --url https://amazon.com --model luna   # GPT-6 Luna Decisions, sees screenshots
+bunx clef-browser run "open my orders" --url https://amazon.com --model luna   # GPT-6 Luna Decisions (add --vision for screenshots)
 bunx clef-browser look --text     # what the model sees
-bunx clef-browser mcp             # MCP server: browser_run, browser_look, browser_click, browser_type, browser_hover, browser_upload, …
+bunx clef-browser mcp             # MCP server: browser_run, browser_look, browser_click, browser_type, browser_hover, browser_upload, browser_tabs, browser_attach, browser_release, …
 ```
 
-Each `--session` (or MCP session) gets its own background tab; omit `--url` to continue where it left off.
+Each `--session` (or MCP session) gets its own background tab, in a tab group you name with `--group` (default "Clef"); omit `--url` to continue where it left off. Take over a tab you already have open with `tabs` + `attach <tabId>`. `release` ends a session: tabs it opened close (`--keep` leaves them open, ungrouped), and taken-over tabs are handed back to their original group. MCP servers release their sessions automatically when the agent disconnects.

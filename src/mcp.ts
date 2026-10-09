@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod"
 import { runAgent } from "./agent.ts"
+import { defaultModel, resolveMode } from "./decide.ts"
 import { describeElement, snapshotPage } from "./snapshot.ts"
 import * as tab from "./tab.ts"
 
@@ -22,6 +23,8 @@ Prefer browser_run for routine web tasks (navigating, searching, following links
 
 Give browser_run one objective on one site with explicit steps, put any text to type in facts, and check status and url before the next step. Read results with browser_page_text or browser_look; finish stuck steps with browser_click / browser_type. Use another browser tool for visual judgment, dragging or drawing, or when clef-browser is blocked.
 
+Tabs: each session controls one tab, in a tab group you can name with \`group\` (sessions with the same group share it). To work in a tab the user already has open, find it with browser_tabs and take it over with browser_attach. When a session's work is done, call browser_release: tabs you opened close (or pass keep_open to leave them for the user), and a taken-over tab is handed back out of your group. Don't leave tabs behind in groups.
+
 Ask the user before anything that purchases, sends, posts, deletes, or submits.`,
     },
   )
@@ -31,14 +34,34 @@ Ask the user before anything that purchases, sends, posts, deletes, or submits.`
       .string()
       .optional()
       .describe(
-        "Agent tab to use. Each session is its own background tab, so different sessions can run in parallel. Defaults to this server's own session.",
+        "Agent tab to use. Each session is its own tab, so different sessions can run in parallel. Defaults to this server's own session.",
+      ),
+    group: z
+      .string()
+      .optional()
+      .describe(
+        'Tab group for the session\'s tab (default "Clef"). Sessions with the same group share it; changing it moves the tab.',
       ),
   }
+  /**
+   * Sessions this server has used, released automatically when the server shuts
+   * down.
+   */
+  const usedSessions = new Set<string>()
   /** Runs a tool handler inside its session's tab context. */
   const inSession =
-    <A extends { session?: string }, R>(handler: (args: A) => Promise<R>) =>
-    (args: A) =>
-      tab.withSession(args.session ?? defaultSession, () => handler(args))
+    <A extends { session?: string; group?: string }, R>(
+      handler: (args: A) => Promise<R>,
+    ) =>
+    (args: A) => {
+      const session = args.session ?? defaultSession
+      usedSessions.add(session)
+      return tab.withSession(
+        session,
+        () => handler(args),
+        args.group ? { group: args.group } : {},
+      )
+    }
 
   server.registerTool(
     "browser_run",
@@ -71,37 +94,35 @@ Ask the user before anything that purchases, sends, posts, deletes, or submits.`
         max_steps: z.number().int().min(1).max(40).default(12),
         model: z
           .enum(["clef", "clef-flash", "jev", "luna"])
-          .default("jev")
+          .optional()
           .describe(
-            "jev (default: text-only, fastest), luna (OpenAI GPT-6 Luna Decisions, sees screenshots; both need AI_GATEWAY_API_KEY), clef (27B, sees screenshots), clef-flash (9B, faster); clef models need Cloudflare keys",
+            "Default: the best model the user's keys allow (jev, else luna, else clef). jev: text-only, fastest. luna: OpenAI GPT-6 Luna Decisions. clef / clef-flash: Cloudflare.",
           ),
-        text_only: z
-          .boolean()
-          .default(false)
+        view: z
+          .enum(["text", "vision"])
+          .optional()
           .describe(
-            "Describe the page as a whole-page text outline instead of a screenshot. Always on for jev.",
+            "How the page is shown: a whole-page text outline or a screenshot. Default: text for jev (always) and luna, vision for clef. Use vision only when meaning is in pixels (unlabeled icons, canvases, charts).",
           ),
         ...sessionArg,
       },
     },
-    inSession(
-      async ({ goal, url, facts, files, max_steps, model, text_only }) => {
-        if (url) await tab.goto(url)
-        const log: string[] = []
-        const result = await runAgent({
-          goal,
-          facts: facts ?? {},
-          files: files ?? {},
-          model,
-          mode: model === "jev" || text_only ? "text" : "vision",
-          maxSteps: max_steps,
-          log: (line) => log.push(line),
-        })
-        return text(
-          `${JSON.stringify(result, null, 2)}\n\nstep log:\n${log.join("\n")}`,
-        )
-      },
-    ),
+    inSession(async ({ goal, url, facts, files, max_steps, model, view }) => {
+      if (url) await tab.goto(url)
+      const log: string[] = []
+      const result = await runAgent({
+        goal,
+        facts: facts ?? {},
+        files: files ?? {},
+        model: model ?? defaultModel(),
+        mode: resolveMode(model ?? defaultModel(), view),
+        maxSteps: max_steps,
+        log: (line) => log.push(line),
+      })
+      return text(
+        `${JSON.stringify(result, null, 2)}\n\nstep log:\n${log.join("\n")}`,
+      )
+    }),
   )
 
   server.registerTool(
@@ -263,16 +284,69 @@ Ask the user before anything that purchases, sends, posts, deletes, or submits.`
   )
 
   server.registerTool(
-    "browser_close",
+    "browser_tabs",
     {
-      description: "Close the session's tab when you're done with it.",
-      inputSchema: sessionArg,
+      description:
+        "List every open Chrome tab: tab id, title, url, tab group, and which session (if any) controls it. Use with browser_attach to work in a tab the user already has open.",
     },
-    inSession(async () => {
-      await tab.close()
-      return text("Closed.")
+    async () => {
+      const tabs = await tab.listTabs()
+      return text(
+        tabs
+          .map(
+            (t) =>
+              `${t.tabId}${t.active ? " (active)" : ""}${t.group ? ` [${t.group}]` : ""}${t.session ? ` (session: ${t.session})` : ""} ${t.title} — ${t.url}`,
+          )
+          .join("\n"),
+      )
+    },
+  )
+
+  server.registerTool(
+    "browser_attach",
+    {
+      description:
+        "Take over an already-open tab (id from browser_tabs) as this session's tab. It moves into the session's group while you work; browser_release hands it back to the user where it was.",
+      inputSchema: { tab_id: z.number().int(), ...sessionArg },
+    },
+    inSession(async ({ tab_id }) => {
+      const { title, url } = await tab.adopt(tab_id)
+      return text(`Now controlling: ${title} — ${url}`)
     }),
   )
+
+  server.registerTool(
+    "browser_release",
+    {
+      description:
+        "End a session when its work is done. Tabs it opened are closed (keep_open: true leaves them open for the user, ungrouped); a tab taken over with browser_attach is always handed back, out of your group. Always release sessions so tabs don't pile up in groups.",
+      inputSchema: {
+        keep_open: z
+          .boolean()
+          .optional()
+          .describe(
+            "Leave the session's own tabs open for the user instead of closing them",
+          ),
+        ...sessionArg,
+      },
+    },
+    inSession(async ({ keep_open }) => {
+      await tab.release(keep_open)
+      return text(
+        keep_open ? "Released; tabs left open for the user." : "Released.",
+      )
+    }),
+  )
+
+  // When the agent goes away (stdin closes), release every session it used so no tabs linger in groups
+  process.stdin.on("close", async () => {
+    await Promise.allSettled(
+      [...usedSessions].map((session) =>
+        tab.withSession(session, () => tab.release()),
+      ),
+    )
+    process.exit(0)
+  })
 
   await server.connect(new StdioServerTransport())
 }
