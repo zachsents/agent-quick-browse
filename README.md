@@ -4,7 +4,7 @@
 
 [![npm](https://img.shields.io/npm/v/agent-quick-browse)](https://www.npmjs.com/package/agent-quick-browse)
 
-**Agents finish multi-step browser tasks 1.6–4.3× faster than with screenshot-driven browser control.**
+**Agents finish multi-step browser tasks 1.6–4.3× faster than with Claude in Chrome.**
 
 Fast, cheap browser actions for agents. A decision model — TypeSafe's Jev, OpenAI's GPT-6 Luna Decisions, or Cloudflare's [Clef](https://developers.cloudflare.com/workers-ai/models/clef/) — picks each action and element in your real, logged-in Chrome; a smarter agent plans the goals. No LLM in the loop. Runs in parallel background tabs, via CLI or MCP.
 
