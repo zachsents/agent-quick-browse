@@ -1,0 +1,109 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Posts</title>
+<script src="app.js"></script>
+<style>
+  .row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px;
+    border-bottom: 1px solid #eee;
+  }
+  .row a {
+    flex: 1;
+  }
+  .actions {
+    display: flex;
+    gap: 6px;
+    opacity: 0;
+  }
+  .row:hover .actions {
+    opacity: 1;
+  }
+  .icon {
+    width: 28px;
+    height: 28px;
+    border-radius: 4px;
+    background: #eee;
+    cursor: pointer;
+    display: grid;
+    place-items: center;
+  }
+  dialog {
+    border: 1px solid #ccc;
+    border-radius: 8px;
+  }
+</style>
+<h1>Posts</h1>
+<div id="list"></div>
+<section id="editor" hidden>
+  <h2>Edit post</h2>
+  <label>Title <input id="title" size="50" /></label>
+  <div id="editor-actions"></div>
+</section>
+<dialog id="confirm">
+  <p>Delete this post?</p>
+  <p>This can't be undone.</p>
+  <button id="cancel">Cancel</button> <button id="delete">Delete</button>
+</dialog>
+<script>
+  let posts = [
+    { id: 1, title: "White missed mate in one", views: 1520 },
+    { id: 2, title: "Castling is checkmate", views: 984 },
+    { id: 3, title: "Bongcloud test", views: 12 },
+    { id: 4, title: "Smothered mate on move 6", views: 2210 },
+  ]
+  const deleted = []
+  let editing = null
+  const list = document.getElementById("list")
+  const editor = document.getElementById("editor")
+  const titleInput = document.getElementById("title")
+  const confirmDialog = document.getElementById("confirm")
+  let pendingDelete = null
+  const render = () =>
+    list.replaceChildren(
+      ...posts.map((post) => {
+        // Icons only appear on hover and are labelled by tooltip text, like TikTok Studio's post rows
+        const row = html(
+          `<div class="row"><a href="#view-${post.id}">${post.title}</a><span>${post.views} views</span><div class="actions"><div class="icon" data-tooltip="Edit">✎</div><div class="icon" data-tooltip="Delete">🗑</div></div></div>`,
+        )
+        const [edit, remove] = row.querySelectorAll(".icon")
+        edit.onclick = () => {
+          editing = post
+          titleInput.value = post.title
+          editor.hidden = false
+          save.button.disabled = true
+        }
+        remove.onclick = () => {
+          pendingDelete = post
+          confirmDialog.showModal()
+        }
+        return row
+      }),
+    )
+  const save = contentsButton(
+    "Save",
+    () => {
+      editing.title = titleInput.value
+      editor.hidden = true
+      render()
+    },
+    { disabled: true },
+  )
+  document.getElementById("editor-actions").append(save.el)
+  titleInput.addEventListener("input", () => (save.button.disabled = false))
+  document.getElementById("cancel").onclick = () => confirmDialog.close()
+  document.getElementById("delete").onclick = () => {
+    posts = posts.filter((post) => post !== pendingDelete)
+    deleted.push(pendingDelete.title)
+    confirmDialog.close()
+    render()
+  }
+  render()
+  window.benchState = () => ({
+    titles: posts.map((post) => post.title),
+    deleted,
+    viewed: location.hash,
+  })
+</script>

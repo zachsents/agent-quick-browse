@@ -1,0 +1,36 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Video details</title>
+<script src="app.js"></script>
+<h1>Video details</h1>
+<p id="saved-note">No changes</p>
+<div id="actions"></div>
+<section>
+  <p>Title (required)</p>
+  <div id="title"></div>
+  <p>Description</p>
+  <div id="description"></div>
+</section>
+<script>
+  const title = hashtagEditor("Add a title that describes your video")
+  const description = hashtagEditor("Tell viewers about your video")
+  document.getElementById("title").append(title.el)
+  document.getElementById("description").append(description.el)
+  let saved = null
+  const save = contentsButton(
+    "Save",
+    () => {
+      saved = {
+        title: title.editor.innerText.trim(),
+        description: description.editor.innerText.trim(),
+      }
+      document.getElementById("saved-note").textContent = "Changes saved"
+      save.button.disabled = true
+    },
+    { disabled: true },
+  )
+  document.getElementById("actions").append(save.el)
+  for (const editor of [title.editor, description.editor])
+    editor.addEventListener("input", () => (save.button.disabled = false))
+  window.benchState = () => ({ saved })
+</script>

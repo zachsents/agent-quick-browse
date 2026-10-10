@@ -1,0 +1,67 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Add location</title>
+<script src="app.js"></script>
+<style>
+  .results {
+    border: 1px solid #ccc;
+    max-width: 360px;
+  }
+  .results div {
+    padding: 6px 8px;
+    cursor: pointer;
+  }
+  .results div:hover {
+    background: #eee;
+  }
+</style>
+<h1>Add location</h1>
+<p>Location: <b id="chosen">none</b></p>
+<input
+  id="search"
+  role="combobox"
+  aria-expanded="false"
+  aria-controls="results"
+  placeholder="Search locations"
+  autocomplete="off"
+/>
+<div id="results" class="results" role="listbox" hidden></div>
+<script>
+  const places = [
+    "San Francisco, California",
+    "San Francisco de Macorís, Dominican Republic",
+    "San Diego, California",
+    "Santa Fe, New Mexico",
+    "Sacramento, California",
+  ]
+  const search = document.getElementById("search")
+  const results = document.getElementById("results")
+  let chosen = null
+  let timer
+  // Suggestions arrive after a short delay, like a server lookup
+  search.addEventListener("input", () => {
+    clearTimeout(timer)
+    timer = setTimeout(() => {
+      const query = search.value.trim().toLowerCase()
+      const matches = query
+        ? places.filter((p) => p.toLowerCase().includes(query))
+        : []
+      results.replaceChildren(
+        ...matches.map((place) => {
+          const option = html(`<div role="option">${place}</div>`)
+          option.onclick = () => {
+            chosen = place
+            search.value = place
+            results.hidden = true
+            search.setAttribute("aria-expanded", "false")
+            document.getElementById("chosen").textContent = place
+          }
+          return option
+        }),
+      )
+      results.hidden = !matches.length
+      search.setAttribute("aria-expanded", String(!!matches.length))
+    }, 400)
+  })
+  window.benchState = () => ({ chosen })
+</script>

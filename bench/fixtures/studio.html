@@ -1,0 +1,99 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Studio upload</title>
+<script src="app.js"></script>
+<h1>Upload</h1>
+<!-- Step 1: drop zone with the real input hidden behind a button -->
+<section id="pick">
+  <p>Select video to upload</p>
+  <p>Or drag and drop it here</p>
+  <button type="button" id="select">Select video</button>
+  <input type="file" id="file" accept="video/*" hidden />
+</section>
+<p id="progress" hidden></p>
+<!-- Step 2: details, shown once the upload finishes -->
+<div id="details" hidden>
+  <section>
+    <p><b>Description</b></p>
+    <div id="caption"></div>
+  </section>
+  <section>
+    <p><b>When to post</b></p>
+    <label><input type="radio" name="when" value="now" checked /> Now</label>
+    <label><input type="radio" name="when" value="schedule" /> Schedule</label>
+    <div id="schedule" hidden>
+      <input readonly value="2026-10-12" aria-label="Date" />
+      <span id="time"></span>
+    </div>
+  </section>
+  <section>
+    <div id="more" hidden></div>
+    <div id="toggle"></div>
+  </section>
+  <p>
+    <button type="button" id="post">Post</button>
+    <button type="button" id="discard">Discard</button>
+  </p>
+</div>
+<script>
+  const file = document.getElementById("file")
+  document.getElementById("select").onclick = () => file.click()
+  let uploaded = null
+  // Uploads take a few seconds and report progress, like the real thing
+  file.addEventListener("change", () => {
+    const name = file.files[0]?.name
+    if (!name) return
+    const progress = document.getElementById("progress")
+    progress.hidden = false
+    let percent = 0
+    const tick = setInterval(() => {
+      percent += 25
+      progress.textContent =
+        percent < 100 ? `Uploading ${name}… ${percent}%` : `${name} Uploaded`
+      if (percent < 100) return
+      clearInterval(tick)
+      uploaded = name
+      document.getElementById("pick").hidden = true
+      document.getElementById("details").hidden = false
+    }, 700)
+  })
+  const caption = hashtagEditor("Description")
+  document.getElementById("caption").append(caption.el)
+  const time = timePicker("12:35")
+  document.getElementById("time").append(time.el)
+  for (const radio of document.querySelectorAll("[name=when]"))
+    radio.addEventListener(
+      "change",
+      () =>
+        (document.getElementById("schedule").hidden =
+          radio.value !== "schedule" || !radio.checked),
+    )
+  const disclose = switchRow("Disclose post content")
+  const ai = switchRow("AI-generated content")
+  const more = document.getElementById("more")
+  more.append(
+    switchRow("Allow comments", { checked: true }).el,
+    disclose.el,
+    ai.el,
+  )
+  const toggle = contentsButton("Show more", () => {
+    more.hidden = !more.hidden
+    toggle.button.textContent = more.hidden ? "Show more" : "Show less"
+  })
+  document.getElementById("toggle").append(toggle.el)
+  let posted = false
+  let discarded = false
+  document.getElementById("post").onclick = () => (posted = true)
+  document.getElementById("discard").onclick = () => (discarded = true)
+  window.benchState = () => ({
+    uploaded,
+    caption: caption.editor.innerText.trim(),
+    when: document.querySelector("[name=when]:checked").value,
+    time: time.value(),
+    ai: ai.on(),
+    disclose: disclose.on(),
+    posted,
+    discarded,
+    popupOpen: caption.popupOpen(),
+  })
+</script>

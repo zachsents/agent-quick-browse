@@ -20,6 +20,7 @@ const ACTIONS = {
     "Press Escape to close a popup, suggestion list, menu, or dialog that is in the way (do not click buttons to dismiss it).",
   press_enter:
     "Press Enter to submit text that was just typed (e.g. a search box with no visible submit button).",
+  wait: "Wait a couple of seconds because something is still loading or processing (an upload in progress, a spinner, results not shown yet).",
   scroll_down: "Scroll down because what is needed is not visible yet.",
   scroll_up: "Scroll back up because what is needed is above the current view.",
   go_back: "Go back to the previous page because this page is a dead end.",
@@ -58,7 +59,11 @@ export async function runAgent({
   maxSteps,
   ...options
 }: Omit<Context, "history"> & { maxSteps: number }) {
-  const ctx: Context = { ...options, history: [] }
+  const ctx: Context = {
+    ...options,
+    facts: R.isEmpty(options.facts) ? quotedText(options.goal) : options.facts,
+    history: [],
+  }
   const { goal, facts, files, model, mode, history, log } = ctx
 
   for (let step = 1; step <= maxSteps; step++) {
@@ -96,7 +101,14 @@ export async function runAgent({
             mode === "vision"
               ? "You are operating a web browser to achieve the goal. The screenshot shows the current page with interactive elements boxed and numbered in red. What is the single best next action?"
               : "You are operating a web browser to achieve the goal. The page is given as a text outline with interactive elements numbered [n]. Elements marked (above/below …) are off-screen but can be clicked or typed into directly — no need to scroll to them. What is the single best next action?",
-          criteria: ACTIONS,
+          // Without facts there's nothing to type (except dropdown choices) and without files nothing to upload;
+          // offering them anyway invites the model to type into search boxes instead of clicking through
+          criteria: R.omit(ACTIONS, [
+            ...(R.isEmpty(facts) && !elements.some((e) => e.tag === "select")
+              ? (["type"] as const)
+              : []),
+            ...(R.isEmpty(files) ? (["upload"] as const) : []),
+          ]),
         },
         ...(elements.length >= 2 && {
           target: {
@@ -179,7 +191,22 @@ async function finish(
  * The model wants to type or upload, but none of the caller's facts or files
  * fits, so the caller has to supply it.
  */
+/**
+ * Text quoted in the goal ("open the story titled “X”"), as facts for goals
+ * passed without any, so the model can search for it.
+ */
+function quotedText(goal: string) {
+  return Object.fromEntries(
+    [...goal.matchAll(/["“]([^"“”]{2,200})["”]/g)].map(([, text], i) => [
+      `quoted_text_${i + 1}`,
+      text ?? "",
+    ]),
+  )
+}
+
 class NeedsInputError extends Error {}
+
+const NO_TEXT = "no text was provided to type here"
 
 /**
  * Snapshots can fail when they land mid-navigation (the document is swapped out
@@ -203,6 +230,8 @@ async function snapshotWithRetry(mode: SnapshotMode) {
  * "type into box, click elsewhere, type into box, …".
  */
 function isLooping(history: string[], summary: string) {
+  // Scrolling repeatedly is how long pages get read; the step limit bounds it
+  if (summary.startsWith("scroll_")) return false
   return (
     // Summaries can contain " -> " themselves (a link's href), so match the whole summary
     history
@@ -293,6 +322,9 @@ async function perform(
       return tab.pressEnter()
     case "press_escape":
       return tab.key("Escape")
+    case "wait":
+      await Bun.sleep(2000)
+      return
     case "scroll_down":
       return tab.scroll(1)
     case "scroll_up":
@@ -336,17 +368,21 @@ async function chooseSelectOption(
 }
 
 /**
- * Uses Clef to pick which of the caller's facts belongs in a text field. Throws
- * NeedsInputError when there are no facts or none fits, which ends the run as
+ * Uses Clef to pick which of the caller's facts belongs in a text field. When
+ * there are no facts or none fits, the first attempt fails like any action (the
+ * goal may be reachable by clicking instead, e.g. paging rather than
+ * searching); a second attempt throws NeedsInputError, which ends the run as
  * blocked so the caller can type it themselves.
  */
 async function chooseFact(
   target: PageElement,
   { goal, facts, history, model }: Context,
 ) {
-  const needsText = new NeedsInputError(
-    `Needs text for ${describeElement(target)}. Pass it in facts, or type it with browser_type.`,
-  )
+  const needsText = history.some((entry) => entry.includes(NO_TEXT))
+    ? new NeedsInputError(
+        `Needs text for ${describeElement(target)}. Pass it in facts, or type it with browser_type.`,
+      )
+    : new Error(`${NO_TEXT}; reach the goal another way (e.g. by clicking)`)
   if (R.isEmpty(facts)) throw needsText
   // With a single fact there's nothing to choose; asking the model only risks a wrong "none of these fits"
   const only = Object.values(facts)

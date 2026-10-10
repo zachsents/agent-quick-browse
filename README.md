@@ -4,46 +4,63 @@
 
 [![npm](https://img.shields.io/npm/v/agent-quick-browse)](https://www.npmjs.com/package/agent-quick-browse)
 
-**Agents finish multi-step browser tasks in 51–77% less time (2–4× faster) than with screenshot-driven browser control.**
+**Agents finish multi-step browser tasks in 38–77% less time (1.6–4.3× faster, 68% less overall) than with screenshot-driven browser control.**
 
 Fast, cheap browser actions for agents. A decision model — TypeSafe's Jev, OpenAI's GPT-6 Luna Decisions, or Cloudflare's [Clef](https://developers.cloudflare.com/workers-ai/models/clef/) — picks each action and element in your real, logged-in Chrome; a smarter agent plans the goals. No LLM in the loop. Runs in parallel background tabs, via CLI or MCP.
 
 ## Recommended setup
 
-- **Model: Jev, text mode (the default when you have a gateway or TypeSafe key).** Fastest at every benchmark level and the most reliable (17–19 of 21 ceiling levels, vs 15 for GPT-6 Luna text and 10–18 for the vision configs). No flags needed. With only an OpenAI key, GPT-6 Luna is picked automatically.
-- **If Jev gets stuck exploring** (e.g. hunting for something across pages), retry that sub-goal with `--model luna`.
+- **Model: Jev, text mode (the default when you have a gateway or TypeSafe key).** Fastest or tied on most benchmark goals, and 5/5 on all of them except Google Flights and the 10-action scheduler draft. No flags needed. With only an OpenAI key, GPT-6 Luna (text) is picked automatically and is close behind.
+- **If Jev gets stuck** on a long app flow, retry that sub-goal with `--model luna` or `--model clef --text` (Clef text finished the 10-action scheduler draft 5/5), or script it with `--match` commands.
 - **Screenshots (`--vision`, with `--model luna` or `clef`) only when meaning is in pixels** — unlabeled icons, canvases, charts. It's slower and less reliable on normal pages.
-- **Driving agent:** split tasks into sub-goals of a few explicit steps each, pass `facts` and `files`, check each result, and finish fiddly widgets (date pickers) yourself with `browser_look` + `browser_click`. That's the setup behind the 51–77% speedup below.
+- **Driving agent:** split tasks into sub-goals of a few explicit steps each, pass `facts` and `files`, check each result, and finish fiddly widgets (date pickers) yourself with `browser_look` + `browser_click`. That's the setup behind the 38–77% speedup below.
 
 ## Benchmarks
 
 ### Agent tasks: Sonnet + AQB vs Sonnet + Claude in Chrome
 
-Each task needs ~3 sub-goals. Same model (Sonnet), same prompt; one side drives `browser_run` (Jev) and finishes stuck steps itself, the other uses Claude in Chrome. Average of 2 runs each; all 16 runs answered correctly.
+Each task needs ~3 sub-goals. Same model (Sonnet), same prompt; one side drives AQB (`run` with Jev for sub-goals, plus `text` / `look` / `click` to read and finish steps), the other uses Claude in Chrome. 2 runs each, 8 agents in parallel; all 16 runs answered correctly.
 
 | Task                                                       | AQB       | Claude in Chrome | Time saved |
 | ---------------------------------------------------------- | --------- | ---------------- | ---------- |
-| GitHub: latest commit → file at that commit → read a value | **28.2s** | 57.3s            | 51%        |
-| Wikipedia fact → fill + submit a form on another site      | **24.9s** | 55.8s            | 55%        |
-| GitHub releases → latest release → tag + date              | **17.5s** | 74.7s            | 77%        |
-| Google Flights: one-way search → cheapest nonstop          | **41.1s** | 104.6s           | 61%        |
+| GitHub: latest commit → file at that commit → read a value | **18.7s** | 72.8s            | 74%        |
+| Wikipedia fact → fill + submit a form on another site      | **14.2s** | 35.7s            | 60%        |
+| GitHub releases → latest release → tag + date              | **23.5s** | 38.0s            | 38%        |
+| Google Flights: one-way search → cheapest nonstop          | **25.8s** | 112.0s           | 77%        |
 
-The agent also used about half as many tool calls (10.6 vs 19.5 per task).
+The agent also made about a third as many tool calls (5.1 vs 14.8 per task). Google Flights now takes a single `run` (it used to need finishing by hand).
 
 ### Single goals: decision models alone
 
-Time per goal, from start page to done (5 runs per decision-model cell, 1 run for Sonnet; pass rate shown when below 5/5). ✗ = failed every run. Across all 21 ceiling levels: Jev 17/21, GPT-6 Luna text 15/21, GPT-6 Luna vision 10/21.
+Time per goal, from start page to done (5 runs per decision-model cell, 1 run for Sonnet; pass rate shown when below 5/5). ✗ = failed every run.
 
 | Goal                      | Jev (text) | GPT-6 Luna (text) | GPT-6 Luna (vision) | Clef (text) | Clef (vision) | Sonnet + Claude in Chrome |
 | ------------------------- | ---------- | ----------------- | ------------------- | ----------- | ------------- | ------------------------- |
-| One click                 | **2.3s**   | 6.4s              | 9.8s                | 6.8s        | 11.8s         | 16.4s                     |
-| Search + pick result      | **4.7s**   | 5.8s              | 8.4s                | 13.9s       | 9.1s          | 16.5s                     |
-| 7-field form + submit     | **7.2s**   | 9.3s              | 10.0s               | 8.9s        | 11.7s         | 21.5s                     |
-| 7-part navigation         | **13.9s**  | 20.8s             | 16.8s (2/5)         | 21.0s       | 23.0s         | 50.2s                     |
-| Find a story across pages | **4.5s**   | 5.6s (2/5)        | ✗                   | ✗           | ✗             | 74.6s                     |
-| Google Flights search     | ✗          | ✗                 | ✗                   | ✗           | ✗             | **56.0s**                 |
+| One click                 | 2.7s       | **2.4s**          | 3.1s                | 4.7s        | 6.0s          | 19.1s                     |
+| Search + pick result      | **4.7s**   | **4.7s**          | 5.4s                | 10.2s       | 8.1s          | 28.7s                     |
+| 7-field form + submit     | **9.8s**   | 9.9s              | 13.1s               | 12.0s       | 12.7s         | 23.2s                     |
+| 7-part navigation         | **17.0s**  | 18.2s             | ✗                   | 22.5s       | 30.3s         | 61.7s                     |
+| Find a story across pages | **6.5s**   | 6.7s              | ✗                   | 17.9s (2/5) | ✗             | 92.2s                     |
+| Google Flights search     | ✗          | ✗                 | ✗                   | ✗           | ✗             | **56.2s**                 |
 
-Sonnet times exclude ~15s of agent startup. Also passing in single-run ceiling tests: 10-part navigation, 4-step "read then follow" chains, 8-field forms with dropdowns/checkboxes/radios, numeric comparisons, hover-only controls (row buttons revealed on hover, hover menus, `mouseenter` menus — 9/9 across Jev, Clef, and Luna with `bun bench/hover.ts`, 0/6 before the hover action), file uploads (plain inputs and hidden inputs behind "Choose file" buttons — no OS file picker ever opens), and returning `blocked` for impossible goals. Where a single goal fails (Google Flights), the agent finishes it with `browser_look` / `browser_click` — still 61% faster end to end. Reproduce the single-goal table with `bun bench/run.ts --levels 1,2,4,14,18,5 --reps 5`.
+Sonnet times exclude ~15s of agent startup; like AQB, it may only navigate to the start URL and must click through everything else. Reproduce with `bun bench/run.ts --levels 1,2,4,14,18,5 --reps 5`.
+
+### App widgets: creator-studio patterns
+
+Local copies of the TikTok Studio / YouTube Studio widgets that trip agents up ([`bench/fixtures`](bench/fixtures)), checked against the exact end state. 5 runs per cell.
+
+| Goal                                                           | Jev (text)  | GPT-6 Luna (text) | GPT-6 Luna (vision) | Clef (text) | Clef (vision) |
+| -------------------------------------------------------------- | ----------- | ----------------- | ------------------- | ----------- | ------------- |
+| Caption with a hashtag suggestion popup                        | 4.4s        | 3.9s              | 4.1s                | **3.6s**    | 4.6s          |
+| Multi-paragraph rich text + Save                               | **5.3s**    | 5.5s              | 6.2s                | 7.0s        | 7.2s          |
+| Switches hidden under "Show more" (aria-hidden inputs)         | **3.4s**    | 3.9s              | 4.4s                | 4.2s        | 4.6s          |
+| Time picker: scrolling, unlabeled hour/minute columns          | **3.4s**    | 3.7s              | ✗                   | 4.5s        | ✗             |
+| Autocomplete: type, then pick the suggestion                   | 3.6s        | **3.3s**          | 4.0s                | 4.0s        | 6.2s          |
+| Hover-only Edit icon → rename → Save                           | **5.2s**    | 6.3s              | 6.9s                | 7.6s        | 7.9s          |
+| Delete + confirm dialog                                        | **3.5s**    | **3.5s**          | 8.2s                | 3.9s        | 5.8s          |
+| Full scheduled-post draft (upload, wait, caption, time, label) | 17.8s (1/5) | ✗                 | ✗                   | **16.8s**   | ✗             |
+
+The full draft is ~10 actions in one goal; models tend to set the hour and skip the minute. Split flows like it into sub-goals, or script them: the same draft with exact commands (`aqb upload/type/click --match …`, [`bench/scripted.sh`](bench/scripted.sh)) takes ~12s, with no decision model and the same result every time. Vision configs can't reach list items scrolled out of view. Reproduce with `bun bench/run.ts --levels 22-29 --reps 5`.
 
 ## Scoping goals
 

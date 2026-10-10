@@ -11,6 +11,8 @@ export type Trial = {
   goal: string | ((prepared: string) => string)
   url: string
   facts?: Record<string, string>
+  /** Local files the agent may upload, by name → absolute path */
+  files?: Record<string, string>
   maxSteps: number
   /**
    * Runs on the start page before the agent; its result is passed to `check`
@@ -18,9 +20,41 @@ export type Trial = {
    */
   prepare?: () => Promise<string>
   check: (
-    page: { url: string; text: string; status: string },
+    page: {
+      url: string
+      text: string
+      status: string
+      /** What the fixture's `window.benchState()` reports (app levels) */
+      state: unknown
+    },
     expected: string | undefined,
   ) => boolean
+}
+
+/** File URL of a benchmark fixture page. */
+function fixture(name: string) {
+  return new URL(`fixtures/${name}`, import.meta.url).href
+}
+
+const CAPTION =
+  "Missed mate in one?! Would you have seen it? #chess #chesstok #fyp"
+const DESCRIPTION =
+  "White castled into checkmate on move 14.\n\nCould you have spotted it? Tell me in the comments. #chess"
+
+/**
+ * Rich-text editors add trailing breaks and may double paragraph breaks, so
+ * texts are compared by their non-blank lines.
+ */
+function sameLines(a: unknown, b: string) {
+  return typeof a === "string" && nonBlankLines(a) === nonBlankLines(b)
+}
+
+function nonBlankLines(text: string) {
+  return text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join("\n")
 }
 
 /**
@@ -293,5 +327,131 @@ export const TRIALS: Trial[] = [
     url: "https://httpbin.org/forms/post",
     maxSteps: 6,
     check: ({ status }) => status === "blocked",
+  },
+
+  // App levels: local copies of the creator-studio widgets that trip agents up (see bench/fixtures/app.js)
+  {
+    level: 22,
+    name: "caption with hashtag popup",
+    goal: "Type the caption into the Description box, then click Save draft. Do not click Post.",
+    url: fixture("caption.html"),
+    facts: { caption: CAPTION },
+    maxSteps: 6,
+    check: ({ state }) =>
+      z
+        .object({ saved: z.literal(CAPTION), posted: z.literal(false) })
+        .safeParse(state).success,
+  },
+  {
+    level: 23,
+    name: "multi-paragraph text",
+    goal: "Set the video's title and description to the given text, then click Save.",
+    url: fixture("description.html"),
+    facts: {
+      title: "Castling Is Checkmate 😱 #chess #shorts",
+      description: DESCRIPTION,
+    },
+    maxSteps: 8,
+    check: ({ state }) => {
+      const saved = z
+        .object({
+          saved: z.object({ title: z.string(), description: z.string() }),
+        })
+        .safeParse(state).data?.saved
+      return (
+        saved?.title === "Castling Is Checkmate 😱 #chess #shorts" &&
+        sameLines(saved.description, DESCRIPTION)
+      )
+    },
+  },
+  {
+    level: 24,
+    name: "hidden switches",
+    goal: "Turn on the AI-generated content label (it's under Show more). Leave the other settings as they are.",
+    url: fixture("switches.html"),
+    maxSteps: 6,
+    check: ({ state }) =>
+      z
+        .object({
+          ai: z.literal(true),
+          disclose: z.literal(false),
+          comments: z.literal(true),
+        })
+        .safeParse(state).success,
+  },
+  {
+    level: 25,
+    name: "scrolling time picker",
+    goal: "Set the time to 17:00 using the hour and minute lists",
+    url: fixture("widgets.html"),
+    maxSteps: 6,
+    check: ({ state }) =>
+      z.object({ time: z.literal("17:00") }).safeParse(state).success,
+  },
+  {
+    level: 26,
+    name: "autocomplete",
+    goal: "Set the location to San Francisco, California",
+    url: fixture("location.html"),
+    facts: { location: "San Francisco" },
+    maxSteps: 6,
+    check: ({ state }) =>
+      z
+        .object({ chosen: z.literal("San Francisco, California") })
+        .safeParse(state).success,
+  },
+  {
+    level: 27,
+    name: "hover icon → edit → save",
+    goal: 'Rename the post "Castling is checkmate" to the new title using its Edit icon, then save',
+    url: fixture("posts.html"),
+    facts: { title: "Castling IS checkmate!" },
+    maxSteps: 8,
+    check: ({ state }) =>
+      z
+        .object({
+          titles: z
+            .array(z.string())
+            .refine(
+              (titles) =>
+                titles.length === 4 &&
+                titles.includes("Castling IS checkmate!") &&
+                !titles.includes("Castling is checkmate"),
+            ),
+        })
+        .safeParse(state).success,
+  },
+  {
+    level: 28,
+    name: "confirm dialog",
+    goal: 'Delete the post "Bongcloud test" and confirm the deletion',
+    url: fixture("posts.html"),
+    maxSteps: 6,
+    check: ({ state }) =>
+      z
+        .object({ deleted: z.tuple([z.literal("Bongcloud test")]) })
+        .safeParse(state).success,
+  },
+  {
+    level: 29,
+    name: "scheduled post draft",
+    goal: "Prepare a scheduled post without posting it: upload the video, wait for the upload to finish, type the caption into Description, choose Schedule and set the time to 17:00, then turn on AI-generated content (under Show more). Do not click Post or Discard.",
+    url: fixture("studio.html"),
+    facts: { caption: CAPTION },
+    files: { video: new URL("fixtures/clip.mp4", import.meta.url).pathname },
+    maxSteps: 20,
+    check: ({ state }) =>
+      z
+        .object({
+          uploaded: z.literal("clip.mp4"),
+          caption: z.literal(CAPTION),
+          when: z.literal("schedule"),
+          time: z.literal("17:00"),
+          ai: z.literal(true),
+          disclose: z.literal(false),
+          posted: z.literal(false),
+          discarded: z.literal(false),
+        })
+        .safeParse(state).success,
   },
 ]

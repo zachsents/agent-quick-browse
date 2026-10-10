@@ -103,25 +103,52 @@ function clippedByContainer(el: Element) {
 }
 
 /**
- * For list items and options, which list they're in ("in minutes"), taken from
- * the list's aria-label, labelling element, or id. Bare items like "12" are
- * otherwise ambiguous when a picker has several lists (hours vs minutes).
+ * Which list an item is in, since bare items like "12" are ambiguous when a
+ * picker has several lists (hours vs minutes): the list's aria-label, labelling
+ * element, or id ("in minutes"), else its position among side-by-side scrolling
+ * columns ("in column 2 of 2", for pickers like TikTok's that label nothing).
  */
 function listContext(el: HTMLElement) {
-  if (
-    !el.matches("li, option, [role=option], [role=menuitem], [role=gridcell]")
+  const list = el.matches(
+    "li, option, [role=option], [role=menuitem], [role=gridcell]",
   )
-    return ""
-  const list = el.closest(
-    "ul, ol, select, [role=listbox], [role=menu], [role=grid], [role=list]",
-  )
-  if (!list) return ""
-  const labelledBy = list.getAttribute("aria-labelledby")
+    ? el.closest(
+        "ul, ol, select, [role=listbox], [role=menu], [role=grid], [role=list]",
+      )
+    : null
+  const labelledBy = list?.getAttribute("aria-labelledby")
   const name =
-    list.getAttribute("aria-label") ??
+    list?.getAttribute("aria-label") ??
     (labelledBy ? document.getElementById(labelledBy)?.textContent : null) ??
-    (/^[a-z][\w-]{2,30}$/i.test(list.id) ? list.id : null)
-  return name ? `in ${clean(name)}` : ""
+    (list && /^[a-z][\w-]{2,30}$/i.test(list.id) ? list.id : null)
+  return name ? `in ${clean(name)}` : scrollColumn(el)
+}
+
+/**
+ * "in column 2 of 2" for an element inside one of several sibling scrolling
+ * columns.
+ */
+function scrollColumn(el: HTMLElement) {
+  for (
+    let column = el.parentElement, depth = 0;
+    column && depth < 4;
+    column = column.parentElement, depth++
+  ) {
+    if (!scrolls(column)) continue
+    const columns = [...(column.parentElement?.children ?? [])].filter(scrolls)
+    return columns.length > 1
+      ? `in column ${columns.indexOf(column) + 1} of ${columns.length}`
+      : ""
+  }
+  return ""
+}
+
+/** Whether an element scrolls its own content vertically. */
+function scrolls(el: Element) {
+  return (
+    el.scrollHeight > el.clientHeight + 1 &&
+    /auto|scroll/.test(getComputedStyle(el).overflowY)
+  )
 }
 
 /**

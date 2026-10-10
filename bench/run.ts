@@ -79,22 +79,31 @@ async function runJob({
             ? trial.goal
             : trial.goal(expected ?? ""),
         facts: trial.facts ?? {},
-        files: {},
+        files: trial.files ?? {},
         model,
         mode,
         maxSteps: trial.maxSteps,
         log: (line) => log.push(line),
       })
-      const [{ url }, text] = await Promise.all([tab.info(), tab.innerText()])
+      const [{ url }, text, state] = await Promise.all([
+        tab.info(),
+        tab.innerText(),
+        tab.evaluateExpression("window.benchState?.() ?? null"),
+      ])
       return {
         status: result.status,
         steps: result.actions.length,
-        success: trial.check({ url, text, status: result.status }, expected),
+        success: trial.check(
+          { url, text, status: result.status, state },
+          expected,
+        ),
+        state,
       }
     })().catch((error: unknown) => ({
       status: `error: ${error instanceof Error ? error.message.split("\n")[0] : String(error)}`,
       steps: 0,
       success: false,
+      state: null,
     }))
     const secs = (performance.now() - started) / 1000
     await tab.close().catch(() => undefined)

@@ -1,0 +1,24 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Caption</title>
+<script src="app.js"></script>
+<h1>New post</h1>
+<p>Description</p>
+<div id="slot"></div>
+<p>
+  <button type="button" id="save">Save draft</button>
+  <button type="button" id="post">Post</button>
+</p>
+<p>Saved: <b id="saved">nothing yet</b></p>
+<script>
+  const caption = hashtagEditor("Description")
+  document.getElementById("slot").append(caption.el)
+  let saved = null
+  let posted = false
+  document.getElementById("save").onclick = () => {
+    saved = caption.editor.innerText.trim()
+    document.getElementById("saved").textContent = saved
+  }
+  document.getElementById("post").onclick = () => (posted = true)
+  window.benchState = () => ({ saved, posted, popupOpen: caption.popupOpen() })
+</script>

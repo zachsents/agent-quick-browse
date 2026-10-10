@@ -85,6 +85,7 @@
       document.getElementById(list).append(li)
     }
   }
+  window.benchState = () => ({ time: time.value })
   fill("hours", 24, 0)
   fill("minutes", 60, 1)
   document.getElementById("video").addEventListener("change", (e) => {

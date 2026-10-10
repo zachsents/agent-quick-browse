@@ -1,0 +1,43 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Post settings</title>
+<script src="app.js"></script>
+<h1>Post settings</h1>
+<section id="card">
+  <p><b>Who can see this post</b>: Everyone</p>
+  <div id="always"></div>
+  <div id="more" hidden></div>
+  <div id="toggle"></div>
+</section>
+<script>
+  const hq = switchRow("High-quality uploads", {
+    checked: true,
+    disabled: true,
+  })
+  const comments = switchRow("Allow comments", { checked: true })
+  const disclose = switchRow("Disclose post content")
+  const ai = switchRow("AI-generated content")
+  document.getElementById("always").append(hq.el, comments.el)
+  document
+    .getElementById("more")
+    .append(
+      disclose.el,
+      html(
+        `<p><small>Let others know this post promotes a brand, product or service.</small></p>`,
+      ),
+      ai.el,
+      html(`<p><small>Add this label for AI-generated content.</small></p>`),
+    )
+  const more = document.getElementById("more")
+  const toggle = contentsButton("Show more", () => {
+    more.hidden = !more.hidden
+    toggle.button.textContent = more.hidden ? "Show more" : "Show less"
+  })
+  document.getElementById("toggle").append(toggle.el)
+  window.benchState = () => ({
+    ai: ai.on(),
+    disclose: disclose.on(),
+    comments: comments.on(),
+    hq: hq.on(),
+  })
+</script>
