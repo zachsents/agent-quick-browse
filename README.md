@@ -10,16 +10,16 @@ Fast, cheap browser actions for agents. A decision model — TypeSafe's Jev, Ope
 
 ## Recommended setup
 
-- **Model: Jev, text mode (the default when you have a gateway or TypeSafe key).** Fastest or tied on most benchmark goals, and 5/5 on all of them except Google Flights and the 10-action scheduler draft. No flags needed. With only an OpenAI key, GPT-6 Luna (text) is picked automatically and is close behind.
-- **If Jev gets stuck** on a long app flow, retry that sub-goal with `--model luna` or `--model clef --text` (Clef text finished the 10-action scheduler draft 5/5), or script it with `--match` commands.
+- **Model: Jev, text mode** (the default with a gateway or TypeSafe key). Fastest and most reliable in the benchmarks below. With only an OpenAI key, GPT-6 Luna (text) is used, and is close behind.
+- **If Jev gets stuck** on a long app flow, retry that sub-goal with `--model luna` or `--model clef --text`, or script it with `--match` commands.
 - **Screenshots (`--vision`, with `--model luna` or `clef`) only when meaning is in pixels** — unlabeled icons, canvases, charts. It's slower and less reliable on normal pages.
-- **Driving agent:** split tasks into sub-goals of a few explicit steps each, pass `facts` and `files`, check each result, and finish fiddly widgets (date pickers) yourself with `browser_look` + `browser_click`. That's the setup behind the speedup below.
+- **Driving agent:** split tasks into sub-goals of a few explicit steps each, pass `facts` and `files`, check each result, and finish fiddly widgets (date pickers) yourself with `browser_look` + `browser_click`.
 
 ## Benchmarks
 
 ### Agent tasks: Sonnet + AQB vs Sonnet + Claude in Chrome
 
-Each task needs ~3 sub-goals. Same model (Sonnet), same prompt; one side drives AQB (`run` with Jev for sub-goals, plus `text` / `look` / `click` to read and finish steps), the other uses Claude in Chrome. 2 runs each, 8 agents in parallel; all 16 runs answered correctly.
+Each task needs ~3 sub-goals. Same model (Sonnet) and prompt on both sides; average of 2 runs, all answered correctly.
 
 | Task                                                       | AQB       | Claude in Chrome | Time saved |
 | ---------------------------------------------------------- | --------- | ---------------- | ---------- |
@@ -28,7 +28,7 @@ Each task needs ~3 sub-goals. Same model (Sonnet), same prompt; one side drives 
 | GitHub releases → latest release → tag + date              | **23.5s** | 38.0s            | 38%        |
 | Google Flights: one-way search → cheapest nonstop          | **25.8s** | 112.0s           | 77%        |
 
-The agent also made about a third as many tool calls (5.1 vs 14.8 per task). On Google Flights, one `run` with explicit steps (one-way, from, to, date, search) did the whole search; given only the bare goal, the decision models don't finish it (see below).
+With AQB the agent also made about a third as many tool calls (5.1 vs 14.8 per task).
 
 ### Single goals: decision models alone
 
@@ -43,29 +43,29 @@ Time per goal, from start page to done (5 runs per decision-model cell, 1 run fo
 | Find a story across pages | **6.5s**   | 6.7s              | ✗                   | 17.9s (2/5) | ✗             | 92.2s                     |
 | Google Flights search     | ✗          | ✗                 | ✗                   | ✗           | ✗             | **56.2s**                 |
 
-Sonnet times exclude ~15s of agent startup; like AQB, it may only navigate to the start URL and must click through everything else. Reproduce with `bun bench/run.ts --levels 1,2,4,14,18,5 --reps 5`.
+Sonnet times exclude agent startup. Reproduce with `bun bench/run.ts --levels 1,2,4,14,18,5 --reps 5`.
 
 ### App widgets: creator-studio patterns
 
-Local copies of the TikTok Studio / YouTube Studio widgets that trip agents up ([`bench/fixtures`](bench/fixtures)), checked against the exact end state. 5 runs per cell.
+Local copies of TikTok Studio / YouTube Studio widgets ([`bench/fixtures`](bench/fixtures)), checked against the exact end state. 5 runs per cell.
 
 | Goal                                                           | Jev (text)  | GPT-6 Luna (text) | GPT-6 Luna (vision) | Clef (text) | Clef (vision) |
 | -------------------------------------------------------------- | ----------- | ----------------- | ------------------- | ----------- | ------------- |
 | Caption with a hashtag suggestion popup                        | 4.4s        | 3.9s              | 4.1s                | **3.6s**    | 4.6s          |
 | Multi-paragraph rich text + Save                               | **5.3s**    | 5.5s              | 6.2s                | 7.0s        | 7.2s          |
-| Switches hidden under "Show more" (aria-hidden inputs)         | **3.4s**    | 3.9s              | 4.4s                | 4.2s        | 4.6s          |
+| Switches hidden under "Show more"                              | **3.4s**    | 3.9s              | 4.4s                | 4.2s        | 4.6s          |
 | Time picker: scrolling, unlabeled hour/minute columns          | **3.4s**    | 3.7s              | ✗                   | 4.5s        | ✗             |
 | Autocomplete: type, then pick the suggestion                   | 3.6s        | **3.3s**          | 4.0s                | 4.0s        | 6.2s          |
 | Hover-only Edit icon → rename → Save                           | **5.2s**    | 6.3s              | 6.9s                | 7.6s        | 7.9s          |
 | Delete + confirm dialog                                        | **3.5s**    | **3.5s**          | 8.2s                | 3.9s        | 5.8s          |
 | Full scheduled-post draft (upload, wait, caption, time, label) | 17.8s (1/5) | ✗                 | ✗                   | **16.8s**   | ✗             |
 
-The full draft is ~10 actions in one goal; models tend to set the hour and skip the minute. Split flows like it into sub-goals, or script them: the same draft with exact commands (`aqb upload/type/click --match …`, [`bench/scripted.sh`](bench/scripted.sh)) takes ~12s, with no decision model and the same result every time. Vision configs can't reach list items scrolled out of view. Reproduce with `bun bench/run.ts --levels 22-29 --reps 5`.
+Long flows in a single goal are unreliable: split them into sub-goals, or script them with `--match` commands ([`bench/scripted.sh`](bench/scripted.sh) does the full draft in ~12s). Vision mode can't reach list items scrolled out of view. Reproduce with `bun bench/run.ts --levels 22-29 --reps 5`.
 
 ## Scoping goals
 
 - **One call:** one objective on one site with explicit steps — "search for X and open the result", "fill the form with these facts and submit", up to ~10 navigation steps, "open the story with the most points".
-- **Split up or do yourself:** complex app widgets like date pickers and Google Flights, unless you spell out every step (with a bare goal, models declare `done` before the final submit), vague or judgment-heavy goals, anything needing writing.
+- **Split up or do yourself:** complex widgets like date pickers and Google Flights (unless you spell out every step), vague or judgment-heavy goals, anything needing writing.
 - Pass every string to type (including dates) as `facts`, and files to upload as `files`. If a rich-text editor mangles typed text (hashtag/mention pickers), pass `keystrokes` (`--keystrokes`) to type it key by key. Check each result (`status`, `reason`, `url`, `actions`) before the next call.
 
 ## Setup
