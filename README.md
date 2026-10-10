@@ -4,7 +4,7 @@
 
 [![npm](https://img.shields.io/npm/v/agent-quick-browse)](https://www.npmjs.com/package/agent-quick-browse)
 
-**Agents finish multi-step browser tasks in 38–77% less time (1.6–4.3× faster, 68% less overall) than with screenshot-driven browser control.**
+**Agents finish multi-step browser tasks 1.6–4.3× faster than with screenshot-driven browser control.**
 
 Fast, cheap browser actions for agents. A decision model — TypeSafe's Jev, OpenAI's GPT-6 Luna Decisions, or Cloudflare's [Clef](https://developers.cloudflare.com/workers-ai/models/clef/) — picks each action and element in your real, logged-in Chrome; a smarter agent plans the goals. No LLM in the loop. Runs in parallel background tabs, via CLI or MCP.
 
@@ -13,7 +13,7 @@ Fast, cheap browser actions for agents. A decision model — TypeSafe's Jev, Ope
 - **Model: Jev, text mode (the default when you have a gateway or TypeSafe key).** Fastest or tied on most benchmark goals, and 5/5 on all of them except Google Flights and the 10-action scheduler draft. No flags needed. With only an OpenAI key, GPT-6 Luna (text) is picked automatically and is close behind.
 - **If Jev gets stuck** on a long app flow, retry that sub-goal with `--model luna` or `--model clef --text` (Clef text finished the 10-action scheduler draft 5/5), or script it with `--match` commands.
 - **Screenshots (`--vision`, with `--model luna` or `clef`) only when meaning is in pixels** — unlabeled icons, canvases, charts. It's slower and less reliable on normal pages.
-- **Driving agent:** split tasks into sub-goals of a few explicit steps each, pass `facts` and `files`, check each result, and finish fiddly widgets (date pickers) yourself with `browser_look` + `browser_click`. That's the setup behind the 38–77% speedup below.
+- **Driving agent:** split tasks into sub-goals of a few explicit steps each, pass `facts` and `files`, check each result, and finish fiddly widgets (date pickers) yourself with `browser_look` + `browser_click`. That's the setup behind the speedup below.
 
 ## Benchmarks
 
