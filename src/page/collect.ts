@@ -397,6 +397,7 @@ export function collect({
     "status",
   ]
   const lines: string[] = []
+  const printed = new Set<string>()
   let pending = ""
   const flush = (depth: number) => {
     const text = clean(pending)
@@ -423,7 +424,9 @@ export function collect({
       if (
         !id &&
         (child.getAttribute("aria-hidden") === "true" ||
-          !child.checkVisibility({ visibilityProperty: true }))
+          // display:contents wrappers (YouTube Studio's buttons) have no box, so checkVisibility calls them hidden
+          (!child.checkVisibility({ visibilityProperty: true }) &&
+            getComputedStyle(child).display !== "contents"))
       )
         continue
 
@@ -431,10 +434,11 @@ export function collect({
       if (id) {
         // Inline with surrounding text so a row like `1. [13] link "Title" (example.com) 42 points` stays together.
         // Numbered controls nested inside (e.g. a row's hover-only buttons) follow it, since the row's subtree is skipped.
-        const nested = [...child.querySelectorAll("[data-aqb-id]")].map((el) =>
-          lineFor.get(el.getAttribute("data-aqb-id") ?? ""),
+        const nested = [...child.querySelectorAll("[data-aqb-id]")].map(
+          (el) => el.getAttribute("data-aqb-id") ?? "",
         )
-        pending += ` ${[lineFor.get(id), ...nested].join(" ")} `
+        for (const printedId of [id, ...nested]) printed.add(printedId)
+        pending += ` ${[id, ...nested].map((each) => lineFor.get(each)).join(" ")} `
         continue
       }
       const level = /^H[1-6]$/.test(child.tagName)
@@ -469,6 +473,14 @@ export function collect({
   }
   walk(document.body, 0)
   flush(0)
+  // Anything the walk skipped (e.g. inside a wrapper it judged hidden) is still listed, so the outline offers every
+  // element the model can pick
+  const missed = elements.filter((e) => !printed.has(e.id))
+  if (missed.length)
+    lines.push(
+      "<other elements>",
+      ...missed.map((e) => `  ${lineFor.get(e.id)}`),
+    )
 
   const header = `(viewport shows y=${Math.round(scrollY)}–${Math.round(scrollY + innerHeight)} of a ${document.documentElement.scrollHeight}px page)`
   const body = lines.join("\n")

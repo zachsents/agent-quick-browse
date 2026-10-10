@@ -241,6 +241,16 @@ Ask the user before anything that purchases, sends, posts, deletes, or submits.`
   )
 
   server.registerTool(
+    "browser_value",
+    {
+      description:
+        "Read the full current value of a numbered field from the latest browser_look (input, textarea, select, or rich-text editor); look truncates long values.",
+      inputSchema: { element: z.number().int().min(1), ...sessionArg },
+    },
+    inSession(async ({ element }) => text(await tab.value(`e${element}`))),
+  )
+
+  server.registerTool(
     "browser_key",
     {
       description:

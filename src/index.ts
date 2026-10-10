@@ -28,6 +28,11 @@ Usage:
   aqb type <n> "<text>" [--keystrokes] [--append] [--submit]   Replace (or append to) field n's text, verified
   aqb key <combo>            Press a key: Escape, Enter, Tab, ArrowDown, Cmd+A, Shift+Tab, …
   aqb scroll <up|down>       aqb upload <n> <path...>   aqb navigate <url>   aqb back   aqb text (page text)
+  aqb value <n>              Print a field's full current value (input, textarea, rich-text editor)
+  aqb wait --match '<regex>' Wait until a line of the outline matches (e.g. 'Uploaded'); prints it
+  Instead of <n>, click/hover/type/upload/value take --match '<regex>' against the outline entry (role "label"),
+  waiting up to --timeout <seconds> (default 30) for it to appear: aqb click --match 'radio "No, it.s not made for kids'
+
   aqb tabs                   List open Chrome tabs (id, group, controlling session)
   aqb attach <tabId>         Take over an already-open tab for the session
   aqb release [--keep]       End the session: close its tabs (--keep: hand them back ungrouped);
@@ -60,6 +65,8 @@ const { values, positionals } = parseArgs({
     "max-steps": { type: "string", default: "25" },
     keystrokes: { type: "boolean", default: false },
     submit: { type: "boolean", default: false },
+    match: { type: "string" },
+    timeout: { type: "string", default: "30" },
     append: { type: "boolean", default: false },
     "save-keys": { type: "boolean", default: false },
     session: { type: "string", default: "default" },
@@ -132,6 +139,8 @@ switch (command) {
   case "navigate":
   case "back":
   case "text":
+  case "value":
+  case "wait":
     await inSession(() => act(command, rest))
     break
   case "attach": {
@@ -315,12 +324,51 @@ function saveKeys() {
   return `Saved ${found.join(", ")} to ${file}.\n\n`
 }
 
-/** Element id for a number from the latest `aqb look`. */
-function elementArg(raw: string | undefined) {
-  const n = Number(raw)
-  if (!Number.isInteger(n) || n < 1)
-    throw new Error("expected an element number from `aqb look`")
-  return `e${n}`
+/**
+ * The element a command targets, plus its remaining arguments: either the first
+ * argument as a number from the latest `aqb look`, or (with --match) the first
+ * element whose outline entry (`role "label"`) matches the regex, waiting up to
+ * --timeout seconds for it to appear.
+ */
+async function target(args: string[]) {
+  if (!values.match) {
+    const n = Number(args[0])
+    if (!Number.isInteger(n) || n < 1)
+      throw new Error(
+        "expected an element number from `aqb look` (or use --match '<regex>')",
+      )
+    return { id: `e${n}`, rest: args.slice(1) }
+  }
+  const pattern = new RegExp(values.match)
+  const line = await waitFor((elements) =>
+    elements
+      .map((e) => `[${e.id.slice(1)}] ${e.role} "${e.label}"`)
+      .find((entry) => pattern.test(entry.replace(/^\[\d+\] /, ""))),
+  )
+  return { id: `e${/^\[(\d+)\]/.exec(line)?.[1]}`, rest: args }
+}
+
+/**
+ * Re-snapshots the page every second until `find` returns something, for up to
+ * --timeout seconds.
+ */
+async function waitFor(
+  find: (
+    elements: Awaited<ReturnType<typeof snapshotPage>>["elements"],
+    outline: string,
+  ) => string | undefined,
+) {
+  const deadline = performance.now() + Number(values.timeout) * 1000
+  for (;;) {
+    const { elements, outline } = await snapshotPage("text")
+    const found = find(elements, outline ?? "")
+    if (found) return found
+    if (performance.now() > deadline)
+      throw new Error(
+        `nothing matched /${values.match}/ within ${values.timeout}s`,
+      )
+    await Bun.sleep(1000)
+  }
 }
 
 /**
@@ -330,33 +378,52 @@ function elementArg(raw: string | undefined) {
 async function act(command: string, args: string[]) {
   switch (command) {
     case "click":
-      await tab.click(elementArg(args[0]))
+      await tab.click((await target(args)).id)
       break
     case "hover":
-      await tab.hover(elementArg(args[0]))
+      await tab.hover((await target(args)).id)
       break
-    case "type":
-      if (args[1] == null)
+    case "type": {
+      const { id, rest } = await target(args)
+      if (!rest.length)
         throw new Error(
-          'usage: aqb type <n> "<text>" [--keystrokes] [--append] [--submit]',
+          'usage: aqb type <n|--match regex> "<text>" [--keystrokes] [--append] [--submit]',
         )
-      await tab.fill(elementArg(args[0]), args.slice(1).join(" "), {
+      await tab.fill(id, rest.join(" "), {
         keystrokes: values.keystrokes,
         append: values.append,
       })
       if (values.submit) await tab.pressEnter()
       break
+    }
     case "upload": {
-      const paths = args.slice(1).map((path) => resolve(path))
+      const { id, rest } = await target(args)
+      const paths = rest.map((path) => resolve(path))
       const missing = paths.find((path) => !existsSync(path))
       if (!paths.length || missing)
         throw new Error(
           missing
             ? `${missing} does not exist`
-            : "usage: aqb upload <n> <path...>",
+            : "usage: aqb upload <n|--match regex> <path...>",
         )
-      console.log(await tab.upload(elementArg(args[0]), paths))
+      console.log(await tab.upload(id, paths))
       break
+    }
+    case "value":
+      console.log(await tab.value((await target(args)).id))
+      return
+    case "wait": {
+      if (!values.match) throw new Error("usage: aqb wait --match '<regex>'")
+      const pattern = new RegExp(values.match)
+      console.log(
+        await waitFor((_, outline) =>
+          outline
+            .split("\n")
+            .find((line) => pattern.test(line))
+            ?.trim(),
+        ),
+      )
+      return
     }
     case "key":
       if (!args[0]) throw new Error("usage: aqb key <Escape|Enter|Tab|Cmd+A|…>")

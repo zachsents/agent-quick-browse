@@ -793,6 +793,34 @@ export async function goBack() {
   await evaluate(() => history.back())
 }
 
+/**
+ * The full current value of a field: an input's or textarea's value, a select's
+ * chosen option, or a rich-text editor's text (the focused inner editor if the
+ * element wraps one).
+ */
+export async function value(id: string) {
+  return z.string().parse(
+    await evaluate((targetId) => {
+      const el = document.querySelector(`[data-aqb-id="${targetId}"]`)
+      if (!el)
+        throw new Error(
+          `element ${targetId.slice(1)} isn't on the page anymore; look again for fresh numbers`,
+        )
+      const field = el.matches("input, textarea, select, [contenteditable]")
+        ? el
+        : (el.querySelector("input, textarea, select, [contenteditable]") ?? el)
+      if (
+        field instanceof HTMLInputElement ||
+        field instanceof HTMLTextAreaElement
+      )
+        return field.value
+      if (field instanceof HTMLSelectElement)
+        return field.selectedOptions[0]?.text ?? ""
+      return field instanceof HTMLElement ? field.innerText : ""
+    }, id),
+  )
+}
+
 export async function innerText() {
   return z.string().parse(await evaluate(() => document.body.innerText))
 }

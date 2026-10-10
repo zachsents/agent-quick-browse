@@ -204,8 +204,12 @@ async function snapshotWithRetry(mode: SnapshotMode) {
  */
 function isLooping(history: string[], summary: string) {
   return (
-    history.slice(-6).filter((entry) => entry.split(" -> ")[0] === summary)
-      .length >= 3
+    // Summaries can contain " -> " themselves (a link's href), so match the whole summary
+    history
+      .slice(-6)
+      .filter(
+        (entry) => entry === summary || entry.startsWith(`${summary} -> `),
+      ).length >= 3
   )
 }
 

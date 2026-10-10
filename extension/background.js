@@ -340,6 +340,28 @@ const attached = new Set()
 chrome.debugger.onDetach.addListener(({ tabId }) => attached.delete(tabId))
 
 /**
+ * Attaches the debugger to a tab. When Chrome restarts this service worker it
+ * forgets which tabs it had attached, but the attachments live on, so a fresh
+ * attach fails with "Another debugger is already attached". If the stale
+ * attachment is ours, detaching works and we start over; if it isn't (DevTools
+ * or another extension), detaching fails and we say so.
+ */
+async function attachDebugger(tabId) {
+  try {
+    await chrome.debugger.attach({ tabId }, "1.3")
+  } catch (error) {
+    if (!String(error?.message).includes("Another debugger")) throw error
+    await chrome.debugger.detach({ tabId }).catch(() => {
+      throw new Error(
+        `tab ${tabId} is being debugged by something else (DevTools or another extension); close that, or release this session and use a new tab`,
+        { cause: error },
+      )
+    })
+    await chrome.debugger.attach({ tabId }, "1.3")
+  }
+}
+
+/**
  * Tabs being closed by a session, whose "Leave site?" prompt is accepted
  * automatically.
  */
@@ -411,7 +433,7 @@ async function ensureAttachedTab(session, group) {
   }
   const { tabId } = meta
   if (!attached.has(tabId)) {
-    await chrome.debugger.attach({ tabId }, "1.3")
+    await attachDebugger(tabId)
     // Hidden tabs otherwise report no focus and some sites pause or skip focus-dependent UI
     await chrome.debugger.sendCommand(
       { tabId },

@@ -98,6 +98,9 @@ aqb type 15 "Caption #chess #fyp" --keystrokes   # replaces the text and verifie
 aqb key Escape                                   # also Enter, Tab, ArrowDown, Cmd+A, Shift+Tab, …
 aqb upload 16 ./video.mp4
 aqb scroll down; aqb navigate <url>; aqb back; aqb text
+aqb value 15                                     # a field's full current value
+aqb click --match 'radio "No, it.s not made for kids'   # target by outline text, waiting up to --timeout 30s
+aqb wait --match 'Uploaded'                      # wait until a line of the outline matches
 ```
 
 For the short `aqb` command, install globally: `bun add -g agent-quick-browse`.
