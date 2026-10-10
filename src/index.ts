@@ -32,6 +32,7 @@ Usage:
   aqb wait --match '<regex>' Wait until a line of the outline matches (e.g. 'Uploaded'); prints it
   Instead of <n>, click/hover/type/upload/value take --match '<regex>' against the outline entry (role "label"),
   waiting up to --timeout <seconds> (default 30) for it to appear: aqb click --match 'radio "No, it.s not made for kids'
+  (--nth <k> or --last picks among several matches)
 
   aqb tabs                   List open Chrome tabs (id, group, controlling session)
   aqb attach <tabId>         Take over an already-open tab for the session
@@ -66,6 +67,8 @@ const { values, positionals } = parseArgs({
     keystrokes: { type: "boolean", default: false },
     submit: { type: "boolean", default: false },
     match: { type: "string" },
+    nth: { type: "string", default: "1" },
+    last: { type: "boolean", default: false },
     timeout: { type: "string", default: "30" },
     append: { type: "boolean", default: false },
     "save-keys": { type: "boolean", default: false },
@@ -340,11 +343,13 @@ async function target(args: string[]) {
     return { id: `e${n}`, rest: args.slice(1) }
   }
   const pattern = new RegExp(values.match)
-  const line = await waitFor((elements) =>
-    elements
+  // --nth / --last pick among several matches, e.g. the minute "00" after the hour "00" in a time picker
+  const line = await waitFor((elements) => {
+    const matches = elements
       .map((e) => `[${e.id.slice(1)}] ${e.role} "${e.label}"`)
-      .find((entry) => pattern.test(entry.replace(/^\[\d+\] /, ""))),
-  )
+      .filter((entry) => pattern.test(entry.replace(/^\[\d+\] /, "")))
+    return values.last ? matches.at(-1) : matches[Number(values.nth) - 1]
+  })
   return { id: `e${/^\[(\d+)\]/.exec(line)?.[1]}`, rest: args }
 }
 
