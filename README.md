@@ -28,7 +28,7 @@ Each task needs ~3 sub-goals. Same model (Sonnet), same prompt; one side drives 
 | GitHub releases → latest release → tag + date              | **23.5s** | 38.0s            | 38%        |
 | Google Flights: one-way search → cheapest nonstop          | **25.8s** | 112.0s           | 77%        |
 
-The agent also made about a third as many tool calls (5.1 vs 14.8 per task). Google Flights now takes a single `run` (it used to need finishing by hand).
+The agent also made about a third as many tool calls (5.1 vs 14.8 per task). On Google Flights, one `run` with explicit steps (one-way, from, to, date, search) did the whole search; given only the bare goal, the decision models don't finish it (see below).
 
 ### Single goals: decision models alone
 
@@ -65,7 +65,7 @@ The full draft is ~10 actions in one goal; models tend to set the hour and skip 
 ## Scoping goals
 
 - **One call:** one objective on one site with explicit steps — "search for X and open the result", "fill the form with these facts and submit", up to ~10 navigation steps, "open the story with the most points".
-- **Split up or do yourself:** complex app widgets (date pickers, Google Flights — models declare `done` before the final submit), vague or judgment-heavy goals, anything needing writing.
+- **Split up or do yourself:** complex app widgets like date pickers and Google Flights, unless you spell out every step (with a bare goal, models declare `done` before the final submit), vague or judgment-heavy goals, anything needing writing.
 - Pass every string to type (including dates) as `facts`, and files to upload as `files`. If a rich-text editor mangles typed text (hashtag/mention pickers), pass `keystrokes` (`--keystrokes`) to type it key by key. Check each result (`status`, `reason`, `url`, `actions`) before the next call.
 
 ## Setup
